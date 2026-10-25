@@ -10,7 +10,28 @@ reverse-engineered RF protocols.
 
 No cloud, no proprietary hub — just local Wi-Fi and radio.
 
-> **Status:** early design. Nothing here is connected to hardware yet.
+> **Status:** the web app is built against a mock hub (`web/`). The firmware
+> doesn't exist yet, so nothing here talks to hardware.
+
+## Web app
+
+The PWA lives in [`web/`](web/): Svelte 5, TypeScript and Vite, styled with
+the Nocturne design system from the FanWave Claude Design project.
+
+```sh
+cd web
+npm install
+npm run dev     # local dev server
+npm run check   # type-check
+npm run build   # static build in web/dist, ready to serve from flash
+```
+
+It has nine screens: Wi‑Fi onboarding, the dashboard, single-fan control,
+pairing (listen for a remote, then learn each button), rooms, hub settings,
+the RF Explorer and Protocol Detective. Everything goes through the `HubApi`
+interface in `web/src/lib/api.ts`; `MockHub` in `web/src/lib/mock.ts` stands
+in for the firmware and keeps its data in `localStorage`. Swap it for an
+HTTP/WebSocket client once the firmware API exists.
 
 ## Two experiences
 

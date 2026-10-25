@@ -1,0 +1,13 @@
+{
+  "name": "FanWave",
+  "short_name": "FanWave",
+  "description": "Local control for your 433 MHz fans.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#161826",
+  "theme_color": "#161826",
+  "icons": [
+    { "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
