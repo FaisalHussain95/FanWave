@@ -4,6 +4,7 @@
   import { api, app } from '../lib/app.svelte';
   import Icon from '../lib/Icon.svelte';
   import { go, href } from '../lib/router.svelte';
+  import { read, write } from '../lib/storage';
 
   let { id }: { id: string } = $props();
 
@@ -11,6 +12,20 @@
 
   let pairing = $state(false);
   let pairResult = $state<string | null>(null);
+  // Press, or hold for this many seconds. Remembered on this device, since a
+  // given fan model wants the same every time.
+  const HOLD_KEY = 'fanwave.pairHold';
+  const holdChoices = [3, 5, 8, 10];
+  const savedHold = holdChoices.includes(Number(read(HOLD_KEY))) ? Number(read(HOLD_KEY)) : 0;
+  let holdSeconds = $state(savedHold);
+  let lastHold = savedHold || 5; // what Hold goes back to after switching to Press
+  let remaining = $state(0);
+
+  function setHold(seconds: number) {
+    holdSeconds = seconds;
+    if (seconds) lastHold = seconds;
+    write(HOLD_KEY, String(seconds));
+  }
 
   let copyName = $state('');
   let copyRoom = $state(app.rooms[0]?.id ?? '');
@@ -29,15 +44,17 @@
     if (!fan) return;
     pairing = true;
     pairResult = null;
+    remaining = holdSeconds;
+    const tick = holdSeconds ? setInterval(() => (remaining = Math.max(remaining - 1, 0)), 1000) : undefined;
     try {
-      const { sent } = await api.pairFan(fan.id);
-      pairResult =
-        sent === 'pair'
-          ? 'Pair signal sent. If the fan beeped or blinked, it has learned this remote.'
-          : 'Sent Power (no Pair button was learned). If the fan beeped or blinked, it has learned this remote.';
+      const { sent } = await api.pairFan(fan.id, holdSeconds);
+      const what = sent === 'pair' ? 'Pair' : 'Power (no Pair button was learned)';
+      const how = holdSeconds ? `held for ${holdSeconds} s` : 'sent';
+      pairResult = `${what} ${how}. If the fan beeped or blinked, it has learned this remote.`;
     } catch (e) {
       pairResult = e instanceof Error ? e.message : String(e);
     } finally {
+      clearInterval(tick);
       pairing = false;
     }
   }
@@ -111,7 +128,7 @@
         <h2 class="h2"><span class="accent"><Icon name="broadcast" /></span>Pair with the fan</h2>
         <ol class="steps-list">
           <li>Switch the fan's power off at the wall switch or breaker, then back on.</li>
-          <li>Within a few seconds, tap <strong>Send pair signal</strong>.</li>
+          <li>Within a few seconds, tap the pair button below.</li>
           <li>Most receivers beep or blink the light once they've learned the remote.</li>
         </ol>
         <p class="hint">
@@ -120,8 +137,31 @@
             : 'No Pair button was learned, so this sends Power, which most receivers also accept while pairing.'}
           Only the fan that was just powered on listens for a new remote.
         </p>
+        <div class="how">
+          <div class="seg" role="group" aria-label="How to send it">
+            <button class="seg-opt" class:on={!holdSeconds} aria-pressed={!holdSeconds} disabled={pairing} onclick={() => setHold(0)}>Press</button>
+            <button class="seg-opt" class:on={!!holdSeconds} aria-pressed={!!holdSeconds} disabled={pairing} onclick={() => setHold(lastHold)}>Hold</button>
+          </div>
+          {#if holdSeconds}
+            <label class="visually-hidden" for="hold-seconds">Hold for</label>
+            <select id="hold-seconds" class="input hold" disabled={pairing} value={holdSeconds} onchange={(e) => setHold(Number(e.currentTarget.value))}>
+              {#each holdChoices as s (s)}<option value={s}>{s} s</option>{/each}
+            </select>
+          {/if}
+        </div>
+        <p class="hint">
+          {holdSeconds
+            ? `Keeps the button down for ${holdSeconds} seconds, like holding it on the remote. Use this if the fan's manual says to hold the pair button.`
+            : 'Three quick presses. If the fan doesn’t pair, try Hold.'}
+        </p>
         <button class="btn btn-primary" disabled={pairing} onclick={pair}>
-          <Icon name="broadcast" />{pairing ? 'Sending…' : 'Send pair signal'}
+          <Icon name="broadcast" />{pairing
+            ? holdSeconds
+              ? `Holding… ${remaining} s`
+              : 'Sending…'
+            : holdSeconds
+              ? `Hold pair signal for ${holdSeconds} s`
+              : 'Send pair signal'}
         </button>
         {#if pairResult}<p class="result" aria-live="polite">{pairResult}</p>{/if}
       </section>
@@ -190,6 +230,12 @@
   .opt { color: var(--color-neutral-600); }
   .copy .btn { margin-top: 8px; }
   .confirm { display: flex; gap: 8px; }
+  .how { display: flex; gap: 8px; align-items: center; }
+  .how .seg { flex: 1; }
+  .seg-opt { flex: 1; justify-content: center; background: transparent; border: 0; color: var(--color-neutral-400); min-height: 36px; }
+  .seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
+  .seg-opt.on { background: var(--color-accent-900); color: var(--color-accent-200); box-shadow: inset 0 0 0 1px var(--color-accent); }
+  .hold { width: 84px; min-height: 36px; }
   .confirm .btn { flex: 1; }
   .btn-danger { border-color: var(--color-neutral-300); color: var(--color-neutral-100); }
 </style>

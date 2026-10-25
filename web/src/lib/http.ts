@@ -152,8 +152,11 @@ export class HttpHub implements HubApi {
     return this.fan(await this.post<Fan>(`/api/fans/${encodeURIComponent(fanId)}/duplicate`, copy));
   }
 
-  pairFan(fanId: string) {
-    return this.post<{ sent: string }>(`/api/fans/${encodeURIComponent(fanId)}/pair`);
+  pairFan(fanId: string, holdSeconds = 0) {
+    return this.post<{ sent: string; heldSeconds: number }>(
+      `/api/fans/${encodeURIComponent(fanId)}/pair`,
+      holdSeconds ? { holdSeconds } : undefined,
+    );
   }
 
   async removeFan(fanId: string) {

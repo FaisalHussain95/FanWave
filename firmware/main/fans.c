@@ -23,6 +23,7 @@ static const char *TAG = "fans";
 #define MIN_CONFIDENCE 0.5f
 #define PAIR_SENDS 3     // a pairing press is sent this many times
 #define PAIR_GAP_MS 300
+#define HOLD_MAX_DURATIONS 32768 // a 10 s hold of a 24-bit code needs about 11,000
 
 static SemaphoreHandle_t s_lock;
 static cJSON *s_rooms;
@@ -349,12 +350,14 @@ static cc1101_config_t fan_radio(const cJSON *fan)
     return r;
 }
 
-static esp_err_t send_button(const cJSON *fan, const char *key, char *err)
+/** One press of a learned button as a pulse train. The caller frees *out. Returns 0 on failure, with err set. */
+static size_t button_train(const cJSON *fan, const char *key, uint32_t **out, char *err)
 {
     const cJSON *cmd = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(fan, "commands"), key);
     if (!cmd) {
         snprintf(err, 96, "This fan has no learned \"%s\" button.", key);
-        return ESP_ERR_NOT_FOUND;
+        *out = NULL;
+        return 0;
     }
     uint32_t *d = NULL;
     size_t n = 0;
@@ -377,14 +380,29 @@ static esp_err_t send_button(const cJSON *fan, const char *key, char *err)
     }
     if (!n) {
         free(d);
+        d = NULL;
         snprintf(err, 96, "The stored \"%s\" code is unreadable.", key);
-        return ESP_FAIL;
     }
+    *out = d;
+    return n;
+}
+
+static esp_err_t transmit(const cJSON *fan, const uint32_t *d, size_t n, char *err)
+{
     cc1101_config_t radio = fan_radio(fan);
     esp_err_t e = hub_transmit_on(&radio, d, n);
-    free(d);
     if (e != ESP_OK && hub_scanning()) snprintf(err, 96, "A frequency scan is running; try again when it finishes.");
     else if (e != ESP_OK) snprintf(err, 96, "Transmit failed: %s", esp_err_to_name(e));
+    return e;
+}
+
+static esp_err_t send_button(const cJSON *fan, const char *key, char *err)
+{
+    uint32_t *d;
+    size_t n = button_train(fan, key, &d, err);
+    if (!n) return ESP_FAIL;
+    esp_err_t e = transmit(fan, d, n, err);
+    free(d);
     return e;
 }
 
@@ -557,7 +575,7 @@ done:
     return result;
 }
 
-const char *fans_pair(const char *id, char *err)
+const char *fans_pair(const char *id, uint32_t hold_ms, char *err)
 {
     xSemaphoreTake(s_lock, portMAX_DELAY);
     const char *sent = NULL;
@@ -569,9 +587,31 @@ const char *fans_pair(const char *id, char *err)
     // Most learning receivers take any button while they're in pairing mode,
     // so without a learned pair button, power is the next best thing.
     const char *key = has_command(fan, "pair") ? "pair" : "power";
-    for (int i = 0; i < PAIR_SENDS; i++) {
-        if (i) vTaskDelay(pdMS_TO_TICKS(PAIR_GAP_MS));
-        if (send_button(fan, key, err) != ESP_OK) goto done;
+    if (hold_ms) {
+        // Held: the press repeated back to back in one transmission, like a
+        // remote with its button kept down. Some receivers only learn that way.
+        uint32_t *press;
+        size_t n = button_train(fan, key, &press, err);
+        if (!n) goto done;
+        fw_timing_t t = fw_analyze(press, n);
+        uint32_t gap = t.gap_us > 5000 ? t.gap_us : 10000;
+        size_t max = HOLD_MAX_DURATIONS;
+        uint32_t *held = malloc(max * sizeof(uint32_t));
+        size_t m = held ? fw_repeat_train(press, n, gap, hold_ms * 1000, held, max) : 0;
+        free(press);
+        if (!m) {
+            free(held);
+            strcpy(err, "Out of memory for a held press.");
+            goto done;
+        }
+        esp_err_t e = transmit(fan, held, m, err);
+        free(held);
+        if (e != ESP_OK) goto done;
+    } else {
+        for (int i = 0; i < PAIR_SENDS; i++) {
+            if (i) vTaskDelay(pdMS_TO_TICKS(PAIR_GAP_MS));
+            if (send_button(fan, key, err) != ESP_OK) goto done;
+        }
     }
     sent = key;
 done:

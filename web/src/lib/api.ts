@@ -46,8 +46,11 @@ export interface HubApi {
   addFan(fan: NewFan): Promise<Fan>;
   /** A virtual copy of a fan's remote under another address (random when none is given). */
   duplicateFan(fanId: string, copy: { name: string; roomId: string; address?: string }): Promise<Fan>;
-  /** Send the fan's pair button (or power) for a receiver in pairing mode. Resolves with the button sent. */
-  pairFan(fanId: string): Promise<{ sent: string }>;
+  /**
+   * Send the fan's pair button (or power) for a receiver in pairing mode: three
+   * presses, or held down for holdSeconds (up to 10). Resolves with the button sent.
+   */
+  pairFan(fanId: string, holdSeconds?: number): Promise<{ sent: string; heldSeconds: number }>;
   /** Forget a fan and its learned buttons. */
   removeFan(fanId: string): Promise<void>;
   /** Called when a fan is removed, from this or another device. Returns an unsubscribe function. */

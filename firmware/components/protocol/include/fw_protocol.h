@@ -110,6 +110,16 @@ bool fw_frame_address(const fw_protocol_t *p, uint64_t bits, uint8_t bit_count, 
 bool fw_frame_with_address(const fw_protocol_t *p, uint64_t bits, uint8_t bit_count, uint64_t address,
                            uint64_t *out);
 
+/**
+ * A button held down: one press's pulse train (alternating mark/space,
+ * starting with a mark) repeated back to back until it lasts at least total_us,
+ * as a remote does while its button is held. A press that ends on a mark gets
+ * gap_us of silence before the next. Returns the number of durations written,
+ * or 0 if not even one press fits in max.
+ */
+size_t fw_repeat_train(const uint32_t *press, size_t count, uint32_t gap_us, uint32_t total_us, uint32_t *out,
+                       size_t max);
+
 /** Summarise short/long pulse widths and the sync gap. */
 fw_timing_t fw_analyze(const uint32_t *durations, size_t count);
 

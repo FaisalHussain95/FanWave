@@ -320,12 +320,25 @@ static esp_err_t post_fan_duplicate(httpd_req_t *req, const char *id)
 
 static esp_err_t post_fan_pair(httpd_req_t *req, const char *id)
 {
-    if (!same_origin(req)) return send_error(req, "403 Forbidden", "Cross-origin requests are not allowed.");
+    // The body is optional: {"holdSeconds": n} holds the button instead of pressing it.
+    uint32_t hold_ms = 0;
+    if (req->content_len) {
+        cJSON *body = read_json(req, 256);
+        if (!body) return ESP_OK;
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(body, "holdSeconds");
+        bool bad = v && (!cJSON_IsNumber(v) || v->valuedouble < 0 || v->valuedouble * 1000 > FANS_PAIR_HOLD_MAX_MS);
+        if (cJSON_IsNumber(v) && !bad) hold_ms = (uint32_t)(v->valuedouble * 1000);
+        cJSON_Delete(body);
+        if (bad) return send_error(req, "400 Bad Request", "holdSeconds must be between 0 and 10.");
+    } else if (!same_origin(req)) {
+        return send_error(req, "403 Forbidden", "Cross-origin requests are not allowed.");
+    }
     char err[96] = "";
-    const char *key = fans_pair(id, err);
+    const char *key = fans_pair(id, hold_ms, err);
     if (!key) return fan_error(req, err);
     cJSON *o = cJSON_CreateObject();
     cJSON_AddStringToObject(o, "sent", key);
+    cJSON_AddNumberToObject(o, "heldSeconds", hold_ms / 1000.0);
     return send_json(req, "200 OK", o);
 }
 

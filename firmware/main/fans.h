@@ -31,12 +31,16 @@ cJSON *fans_command(const char *id, const cJSON *patch, char *err);
  */
 cJSON *fans_duplicate(const char *id, const cJSON *body, char *err);
 
+#define FANS_PAIR_HOLD_MAX_MS 10000
+
 /**
- * Send the fan's pair button (or power, if none was learned) a few times, for
- * a fan receiver that has just been powered on and is listening for a new
- * remote. Returns the key sent, or NULL on failure. Doesn't change the fan's state.
+ * Send the fan's pair button (or power, if none was learned), for a fan
+ * receiver that has just been powered on and is listening for a new remote:
+ * three presses when hold_ms is 0, else the button held down for hold_ms (at
+ * most FANS_PAIR_HOLD_MAX_MS). Returns the key sent, or NULL on failure.
+ * Doesn't change the fan's state.
  */
-const char *fans_pair(const char *id, char *err);
+const char *fans_pair(const char *id, uint32_t hold_ms, char *err);
 
 /** Forget a fan and its learned buttons. */
 esp_err_t fans_remove(const char *id, char *err);

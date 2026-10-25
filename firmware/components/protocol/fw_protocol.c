@@ -321,6 +321,25 @@ bool fw_frame_with_address(const fw_protocol_t *p, uint64_t bits, uint8_t bit_co
     return true;
 }
 
+size_t fw_repeat_train(const uint32_t *press, size_t count, uint32_t gap_us, uint32_t total_us, uint32_t *out,
+                       size_t max)
+{
+    if (!count) return 0;
+    bool ends_on_mark = count % 2 == 1;
+    size_t per = count + (ends_on_mark ? 1 : 0);
+    uint64_t press_us = ends_on_mark ? gap_us : 0;
+    for (size_t i = 0; i < count; i++) press_us += press[i];
+    size_t n = 0;
+    uint64_t total = 0;
+    do {
+        if (n + per > max) break;
+        for (size_t i = 0; i < count; i++) out[n++] = press[i];
+        if (ends_on_mark) out[n++] = gap_us;
+        total += press_us;
+    } while (total < total_us && press_us > 0);
+    return n;
+}
+
 static int cmp_u32(const void *a, const void *b)
 {
     uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;
