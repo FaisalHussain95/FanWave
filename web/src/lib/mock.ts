@@ -2,6 +2,7 @@
 // Fans and rooms persist to localStorage so the demo survives a reload.
 
 import type { HubApi, NewFan, PairSignal } from './api';
+import { read } from './storage';
 import type {
   Backup,
   Capture,
@@ -154,7 +155,8 @@ export class MockHub implements HubApi {
   private info: HubInfo = {
     name: 'FanWave‑3F2A', hardware: 'ESP32‑S3 · CC1101', host: 'fanwave.local', online: true,
     uptimeSeconds: 6 * 86400 + 4 * 3600, wifiRssi: -58, heapFreeBytes: 212 * 1024,
-    wifiNetwork: 'Maison‑5G', accessPointFallback: true, localOnly: true, radioOk: true,
+    // Like a fresh hub, start off any network until this browser has been through setup.
+    wifiNetwork: read('fanwave.setupDone') === '1' ? 'Maison‑5G' : null, accessPointFallback: true, localOnly: true, radioOk: true,
     led: loadLed(),
     firmware: '0.8.3', update: { version: '0.9.0', sizeBytes: 1.4 * 1024 * 1024 },
   };
