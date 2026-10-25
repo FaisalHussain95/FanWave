@@ -32,8 +32,8 @@ hub's only way to show what it's doing without opening the app.
 
 **Wiring.** The LED's data pin is GPIO48 on v1.0 boards and GPIO38 on v1.1;
 make it a build-time setting and check the board revision. It needs a timed
-data signal, not a plain on/off pin: drive it with ESP-IDF's `led_strip`
-component on the RMT peripheral. On the N16R8 module the octal PSRAM takes
+data signal, not a plain on/off pin: the firmware drives it with a small
+WS2812 encoder on the RMT peripheral (`firmware/components/status_led`). On the N16R8 module the octal PSRAM takes
 GPIO35–37, so the CC1101's SPI and data pins must stay off those and off the
 LED pin.
 
@@ -74,14 +74,18 @@ seconds so you can tell which board you're talking to.
 
 ## 3. RF engine
 
-Drives the CC1101 over SPI.
+Drives the CC1101 over SPI. Wiring is in [`firmware/README.md`](../firmware/README.md).
 
 - **RX:** asynchronous (raw) mode for capturing pulse timings; packet mode where
   a protocol is known
 - **TX:** replays learned raw timings or encoded frames
-- Configurable modulation (OOK / 2-FSK), frequency, data rate, and bandwidth
+- Configurable modulation (OOK / 2-FSK), frequency, data rate, and bandwidth.
+  Many US fan remotes use 302–305 MHz rather than 433.92; see
+  [protocols.md](protocols.md).
 
 ## 4. Protocol engine
+
+Which protocols, and why: [protocols.md](protocols.md).
 
 - **Decode:** turn pulse timings into bitstreams
 - **Match:** compare against known fan-remote protocols and report frame

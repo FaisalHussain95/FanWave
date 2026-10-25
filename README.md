@@ -10,8 +10,10 @@ reverse-engineered RF protocols.
 
 No cloud, no proprietary hub — just local Wi-Fi and radio.
 
-> **Status:** the web app is built against a mock hub (`web/`). The firmware
-> doesn't exist yet, so nothing here talks to hardware.
+> **Status:** the web app (`web/`) runs against a mock hub. The firmware
+> (`firmware/`) brings up the radio and captures, decodes and replays remote
+> codes from a serial console; Wi‑Fi and the API the app needs come next.
+> None of it has run on real hardware yet.
 
 ## Web app
 
@@ -32,6 +34,12 @@ the RF Explorer and Protocol Detective. Everything goes through the `HubApi`
 interface in `web/src/lib/api.ts`; `MockHub` in `web/src/lib/mock.ts` stands
 in for the firmware and keeps its data in `localStorage`. Swap it for an
 HTTP/WebSocket client once the firmware API exists.
+
+## Firmware
+
+ESP-IDF 5.4 project in [`firmware/`](firmware/): wiring, build and console
+commands are in its [README](firmware/README.md). Supported remote protocols
+and the research behind them are in [docs/protocols.md](docs/protocols.md).
 
 ## Two experiences
 
