@@ -34,6 +34,26 @@ menu "FanWave"
             (Hampton Bay, Harbor Breeze, Minka) use about 303000-305000.
             Change it at run time with the "freq" console command.
 
+    config FANWAVE_AP_PASSWORD
+        string "Setup access point password"
+        default ""
+        help
+            The hub opens a "FanWave-XXXX" access point when it has no
+            working Wi-Fi. Empty leaves it open, which is easiest for setup
+            but lets anyone nearby reach the hub while it's up. Use at least
+            8 characters to require WPA2.
+
+    config FANWAVE_RF_MIN_RSSI
+        int "Weakest undecoded signal to keep (dBm)"
+        default -80
+        range -110 -30
+        help
+            In OOK mode the receiver turns background noise into a constant
+            stream of short bursts. Bursts that no decoder recognises are
+            dropped unless they arrived at least this strong. Raise it if
+            noise still shows up in the RF Lab; lower it if a weak remote is
+            missed.
+
     config FANWAVE_RF_IDLE_US
         int "Silence that ends a capture (µs)"
         default 20000

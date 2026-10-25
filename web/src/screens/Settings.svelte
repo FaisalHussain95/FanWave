@@ -9,6 +9,25 @@
 
   let progress = $state<number | null>(null);
   let fileInput = $state<HTMLInputElement>();
+  let firmwareInput = $state<HTMLInputElement>();
+  let uploadProgress = $state<number | null>(null);
+
+  async function uploadFirmware(e: Event) {
+    const file = (e.currentTarget as HTMLInputElement).files?.[0];
+    if (!file) return;
+    uploadProgress = 0;
+    try {
+      const version = await api.uploadFirmware(file, (f) => (uploadProgress = f));
+      app.notify(`Firmware ${version} installed. The hub is restarting…`);
+      // Give it time to reboot, then reload the app it now serves.
+      setTimeout(() => location.reload(), 8000);
+    } catch (err) {
+      app.notify(err instanceof Error ? err.message : String(err));
+    } finally {
+      uploadProgress = null;
+      if (firmwareInput) firmwareInput.value = '';
+    }
+  }
 
   const hub = $derived(app.hub);
   // Follows the hub, but tracks the slider while it's dragged; saved on release.
@@ -104,7 +123,28 @@
           {/if}
         </div>
       {:else}
-        <p class="sub">Firmware {hub.firmware} · up to date</p>
+        <div class="panel">
+          <div class="row">
+            <span class="muted"><Icon name="arrow-circle-up" size="18px" /></span>
+            <span class="grow stack">
+              <span>Firmware {hub.firmware}</span>
+              {#if uploadProgress === null}
+                <span class="hint">Install a new version from a .bin file</span>
+              {:else}
+                <span class="hint">Uploading… {percent(uploadProgress)}. Keep the hub powered.</span>
+              {/if}
+            </span>
+            <button class="btn btn-secondary" style="height:36px" disabled={uploadProgress !== null} onclick={() => firmwareInput?.click()}>
+              Choose file
+            </button>
+          </div>
+          {#if uploadProgress !== null}
+            <div class="progress upload" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(uploadProgress * 100)} aria-label="Firmware upload">
+              <span style:width={percent(uploadProgress)}></span>
+            </div>
+          {/if}
+        </div>
+        <input class="visually-hidden" type="file" accept=".bin,application/octet-stream" tabindex="-1" aria-hidden="true" bind:this={firmwareInput} onchange={uploadFirmware} />
       {/if}
 
       <div class="panel">
@@ -220,6 +260,7 @@
   }
   .accent-icon { color: var(--color-accent); display: inline-flex; }
   .progress { height: 6px; border-radius: 3px; background: var(--color-accent-800); overflow: hidden; }
+  .progress.upload { margin: 0 14px 14px; }
   .progress span { display: block; height: 100%; background: var(--color-accent); transition: width 0.15s; }
   .muted { color: var(--color-neutral-400); display: inline-flex; }
   .faint { color: var(--color-neutral-600); display: inline-flex; }

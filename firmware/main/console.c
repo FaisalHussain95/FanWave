@@ -24,8 +24,8 @@ static int cmd_status(int argc, char **argv)
     printf("radio:     %s (PARTNUM 0x%02x, VERSION 0x%02x)\n", err == ESP_OK ? "ok" : esp_err_to_name(err), partnum,
            version);
     printf("frequency: %.3f MHz %s\n", c.frequency_hz / 1e6, c.modulation == CC1101_MOD_OOK ? "OOK" : "2-FSK");
-    printf("listening: %s\n", rf_listening() ? "yes" : "no");
-    if (rf_listening()) printf("rssi:      %d dBm\n", cc1101_rssi_dbm());
+    printf("listening: %s\n", radio_listening() ? "yes" : "no");
+    if (radio_listening()) printf("rssi:      %d dBm\n", cc1101_rssi_dbm());
     return 0;
 }
 
@@ -67,7 +67,7 @@ static int cmd_listen(int argc, char **argv)
         printf("usage: listen on|off\n");
         return 1;
     }
-    esp_err_t err = rf_set_listening(strcmp(argv[1], "on") == 0);
+    esp_err_t err = radio_set_listening(strcmp(argv[1], "on") == 0);
     printf("%s\n", err == ESP_OK ? "ok" : esp_err_to_name(err));
     return err != ESP_OK;
 }

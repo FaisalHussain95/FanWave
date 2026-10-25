@@ -22,7 +22,7 @@ typedef struct {
     int tx_gpio;          // CC1101 GDO0
     uint32_t idle_us;     // silence that ends a capture; must exceed the longest sync gap
     uint32_t min_marks;   // captures with fewer marks are dropped as noise
-} rf_config_t;
+} radio_config_t;
 
 /** One burst of activity: durations in µs, alternating mark/space, starting with a mark. */
 typedef struct {
@@ -30,23 +30,23 @@ typedef struct {
     size_t count;
     int rssi_dbm;   // strongest RSSI sampled while the burst was arriving
     int64_t at_us;  // esp_timer time when it ended
-} rf_capture_t;
+} radio_capture_t;
 
-esp_err_t rf_init(const rf_config_t *config);
+esp_err_t radio_init(const radio_config_t *config);
 
 /** Start or stop listening. Puts the CC1101 in RX or idle. */
-esp_err_t rf_set_listening(bool on);
-bool rf_listening(void);
+esp_err_t radio_set_listening(bool on);
+bool radio_listening(void);
 
-/** Wait for the next capture. On success the caller owns it and must call rf_capture_free(). */
-bool rf_next_capture(rf_capture_t *out, TickType_t wait);
-void rf_capture_free(rf_capture_t *capture);
+/** Wait for the next capture. On success the caller owns it and must call radio_capture_free(). */
+bool radio_next_capture(radio_capture_t *out, TickType_t wait);
+void radio_capture_free(radio_capture_t *capture);
 
 /**
  * Transmit a pulse train (same format as a capture) once, blocking until it
  * has been sent. Listening resumes afterwards if it was on.
  */
-esp_err_t rf_transmit(const uint32_t *durations, size_t count);
+esp_err_t radio_transmit(const uint32_t *durations, size_t count);
 
 #ifdef __cplusplus
 }

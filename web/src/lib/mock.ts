@@ -12,6 +12,7 @@ import type {
   LedSettings,
   Modulation,
   ProtocolMatch,
+  ReceiverState,
   Room,
   WifiNetwork,
 } from './types';
@@ -147,6 +148,7 @@ export class MockHub implements HubApi {
   private nextCaptureId = 15;
   private listening = true;
   private modulation: Modulation = 'OOK';
+  private frequencyMHz = 433.92;
   private captureSubs = new Set<(c: Capture) => void>();
   private captureTimer: ReturnType<typeof setInterval> | null = null;
   private info: HubInfo = {
@@ -241,6 +243,7 @@ export class MockHub implements HubApi {
     await wait(1200);
     if (password.length > 0 && password.length < 8) throw new Error('That password is too short for WPA2.');
     this.info.wifiNetwork = ssid;
+    return { address: null };
   }
 
   async captures() {
@@ -248,11 +251,22 @@ export class MockHub implements HubApi {
     return structuredClone(this.captureList);
   }
 
-  async setReceiver(opts: { listening: boolean; modulation: Modulation }) {
+  onFan() {
+    return () => {};
+  }
+
+  async receiver(): Promise<ReceiverState> {
+    await wait(40);
+    return { listening: this.listening, modulation: this.modulation, frequencyMHz: this.frequencyMHz };
+  }
+
+  async setReceiver(opts: Partial<ReceiverState>) {
     await wait(60);
-    this.listening = opts.listening;
-    this.modulation = opts.modulation;
+    this.listening = opts.listening ?? this.listening;
+    this.modulation = opts.modulation ?? this.modulation;
+    this.frequencyMHz = opts.frequencyMHz ?? this.frequencyMHz;
     this.syncCaptureTimer();
+    return { listening: this.listening, modulation: this.modulation, frequencyMHz: this.frequencyMHz };
   }
 
   onCapture(cb: (c: Capture) => void) {
@@ -311,10 +325,10 @@ export class MockHub implements HubApi {
   }
 
   learnButton(slot: LearnSlot, signal: AbortSignal) {
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<{ code: string; captureId: number | null }>((resolve, reject) => {
       const t = setTimeout(() => {
         const cmd = slotCommands[slot.label] ?? '1111';
-        resolve(`0x3A5C1 · ${cmd}`);
+        resolve({ code: `0x3A5C1 · ${cmd}`, captureId: null });
       }, 1400);
       signal.addEventListener('abort', () => {
         clearTimeout(t);
@@ -338,6 +352,17 @@ export class MockHub implements HubApi {
 
   async identify() {
     await wait(80);
+  }
+
+  async uploadFirmware(file: File, onProgress: (f: number) => void) {
+    if (!file.name.endsWith('.bin')) throw new Error('Choose a firmware .bin file.');
+    for (let i = 1; i <= 10; i++) {
+      await wait(120);
+      onProgress(i / 10);
+    }
+    this.info.firmware = '0.9.0';
+    this.info.update = null;
+    return this.info.firmware;
   }
 
   async installUpdate(onProgress: (f: number) => void) {

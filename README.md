@@ -10,10 +10,10 @@ reverse-engineered RF protocols.
 
 No cloud, no proprietary hub — just local Wi-Fi and radio.
 
-> **Status:** the web app (`web/`) runs against a mock hub. The firmware
-> (`firmware/`) brings up the radio and captures, decodes and replays remote
-> codes from a serial console; Wi‑Fi and the API the app needs come next.
-> None of it has run on real hardware yet.
+> **Status:** the firmware (`firmware/`) runs the radio, Wi‑Fi and the API,
+> and serves the web app (`web/`). Everything builds and the app has been
+> tested against a stand-in for the API, but none of it has run on real
+> hardware yet.
 
 ## Web app
 
@@ -28,12 +28,16 @@ npm run check   # type-check
 npm run build   # static build in web/dist, ready to serve from flash
 ```
 
+`npm run dev` uses an in-browser mock hub. To develop against a real one,
+point the dev server's proxy at it: `VITE_HUB_URL=http://192.168.1.23 npm run dev`.
+Add `?mock` to any URL to force the mock (for demos).
+
 It has nine screens: Wi‑Fi onboarding, the dashboard, single-fan control,
 pairing (listen for a remote, then learn each button), rooms, hub settings,
 the RF Explorer and Protocol Detective. Everything goes through the `HubApi`
-interface in `web/src/lib/api.ts`; `MockHub` in `web/src/lib/mock.ts` stands
-in for the firmware and keeps its data in `localStorage`. Swap it for an
-HTTP/WebSocket client once the firmware API exists.
+interface in `web/src/lib/api.ts`: `HttpHub` (`http.ts`) talks to the
+firmware's API ([docs/api.md](docs/api.md)), and `MockHub` (`mock.ts`) fakes
+it in the browser.
 
 ## Firmware
 

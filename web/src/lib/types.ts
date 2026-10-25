@@ -23,6 +23,7 @@ export interface Fan {
   /** Human label for the protocol line, e.g. "PT2262 · 0x3A5C1" or "Raw · 6 codes". */
   protocolLabel: string;
   frequencyMHz: number;
+  modulation?: Modulation;
   speeds: number;
   capabilities: Capability[];
   /** What FanWave last sent. */
@@ -47,6 +48,8 @@ export interface HubInfo {
   wifiRssi: number;
   heapFreeBytes: number;
   wifiNetwork: string | null;
+  /** The hub is running its own setup access point. */
+  setupMode?: boolean;
   accessPointFallback: boolean;
   localOnly: boolean;
   radioOk: boolean;
@@ -78,6 +81,7 @@ export interface Capture {
   at: number;
   modulation: Modulation;
   rssi: number;
+  frequencyMHz?: number;
   repeats: number;
   /** Decoded bits, when the pulse train decodes to a fixed-width frame. */
   bits: string | null;
@@ -107,6 +111,16 @@ export interface ProtocolMatch {
   confidence: number;
   note: string;
   frame: FrameField[];
+  /** Decoded fields, when the protocol has an address part. */
+  address?: string;
+  command?: string;
+  bits?: string;
+}
+
+export interface ReceiverState {
+  listening: boolean;
+  modulation: Modulation;
+  frequencyMHz: number;
 }
 
 export interface LearnSlot {
@@ -115,6 +129,8 @@ export interface LearnSlot {
   capability: Capability;
   /** Code as shown to the user, e.g. "0x3A5C1 · 0110". */
   code: string | null;
+  /** The capture the hub stores this button from. */
+  captureId?: number | null;
   status: 'todo' | 'listening' | 'done' | 'skipped';
 }
 

@@ -1,6 +1,6 @@
 <script lang="ts">
   import TabBar from '../components/TabBar.svelte';
-  import { api } from '../lib/app.svelte';
+  import { api, app } from '../lib/app.svelte';
   import Icon from '../lib/Icon.svelte';
   import { bitsToHex, nibbles, wavePath } from '../lib/rf';
   import { href } from '../lib/router.svelte';
@@ -10,10 +10,21 @@
   let selectedId = $state<number | null>(null);
   let listening = $state(true);
   let modulation = $state<Modulation>('OOK');
+  let frequency = $state(433.92);
+  let ready = $state(false);
+
+  // Common remote frequencies: US ceiling fans sit around 303–305 MHz.
+  const presets = [303.875, 304.25, 315, 390, 418, 433.92];
 
   const selected = $derived(captures.find((c) => c.id === selectedId) ?? captures[0]);
 
   api.captures().then((list) => (captures = list));
+  api.receiver().then((r) => {
+    listening = r.listening;
+    modulation = r.modulation;
+    frequency = r.frequencyMHz;
+    ready = true;
+  });
 
   $effect(() =>
     api.onCapture((c) => {
@@ -21,9 +32,13 @@
     }),
   );
 
+  // Push changes once the receiver's current state has been read.
   $effect(() => {
-    api.setReceiver({ listening, modulation });
+    const opts = { listening, modulation, frequencyMHz: frequency };
+    if (ready) api.setReceiver(opts).catch((e) => app.notify(e instanceof Error ? e.message : String(e)));
   });
+
+  const frequencyOptions = $derived(presets.includes(frequency) ? presets : [...presets, frequency].sort((a, b) => a - b));
 
   function captureText(c: Capture) {
     return c.bits ? bitsToHex(c.bits) : `raw · ${c.pulseCount} pulses`;
@@ -45,7 +60,10 @@
           <button class="seg-opt" class:on={modulation === m} aria-pressed={modulation === m} onclick={() => (modulation = m)}>{m}</button>
         {/each}
       </div>
-      <span class="tag tag-outline mono">433.92 MHz</span>
+      <label class="visually-hidden" for="rx-freq">Frequency</label>
+      <select id="rx-freq" class="freq mono" bind:value={frequency}>
+        {#each frequencyOptions as f (f)}<option value={f}>{f} MHz</option>{/each}
+      </select>
     </div>
 
     {#if selected}
@@ -109,6 +127,11 @@
   .head .screen-title { font-size: 22px; }
   .accent { color: var(--color-accent); display: inline-flex; }
   .tune { display: flex; gap: 8px; align-items: center; }
+  .freq {
+    appearance: none; min-height: 36px; padding: 0 10px; font-size: 11px; cursor: pointer;
+    color: var(--color-accent); background: transparent;
+    border: 1px solid var(--color-accent); border-radius: calc(var(--radius-md) * 0.75);
+  }
   .seg { flex: 1; }
   .seg-opt { flex: 1; justify-content: center; background: transparent; border: 0; color: var(--color-neutral-400); min-height: 36px; }
   .seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }

@@ -24,7 +24,7 @@ static const char *TAG = "rf";
 #define RSSI_SAMPLE_MS 2
 #define CAPTURE_QUEUE 4
 
-static rf_config_t s_cfg;
+static radio_config_t s_cfg;
 static rmt_channel_handle_t s_rx, s_tx;
 static rmt_encoder_handle_t s_copy;
 static rmt_symbol_word_t *s_rx_buf;
@@ -67,12 +67,12 @@ static size_t to_durations(const rmt_symbol_word_t *sym, size_t nsym, uint32_t *
     return n;
 }
 
-static void push_capture(const rf_capture_t *c)
+static void push_capture(const radio_capture_t *c)
 {
     if (xQueueSend(s_captures, c, 0) == pdTRUE) return;
     // Full: drop the oldest so the newest press is never lost.
-    rf_capture_t old;
-    if (xQueueReceive(s_captures, &old, 0) == pdTRUE) rf_capture_free(&old);
+    radio_capture_t old;
+    if (xQueueReceive(s_captures, &old, 0) == pdTRUE) radio_capture_free(&old);
     xQueueSend(s_captures, c, 0);
 }
 
@@ -118,7 +118,7 @@ static void rx_task(void *arg)
         size_t n = to_durations(s_rx_buf, nsym, durations);
         if ((n + 1) / 2 < s_cfg.min_marks) continue;
 
-        rf_capture_t c = {
+        radio_capture_t c = {
             .durations = malloc(n * sizeof(uint32_t)),
             .count = n,
             .rssi_dbm = rssi,
@@ -130,14 +130,14 @@ static void rx_task(void *arg)
     }
 }
 
-esp_err_t rf_init(const rf_config_t *config)
+esp_err_t radio_init(const radio_config_t *config)
 {
     s_cfg = *config;
     if (s_cfg.idle_us == 0 || s_cfg.idle_us > MAX_TICKS) s_cfg.idle_us = 20000;
     if (s_cfg.min_marks == 0) s_cfg.min_marks = 16;
 
     s_done = xQueueCreate(1, sizeof(size_t));
-    s_captures = xQueueCreate(CAPTURE_QUEUE, sizeof(rf_capture_t));
+    s_captures = xQueueCreate(CAPTURE_QUEUE, sizeof(radio_capture_t));
     s_radio = xSemaphoreCreateMutex();
     s_rx_buf = heap_caps_malloc(RX_SYMBOLS * sizeof(rmt_symbol_word_t), MALLOC_CAP_DMA | MALLOC_CAP_INTERNAL);
     ESP_RETURN_ON_FALSE(s_done && s_captures && s_radio && s_rx_buf, ESP_ERR_NO_MEM, TAG, "alloc");
@@ -171,7 +171,7 @@ esp_err_t rf_init(const rf_config_t *config)
     return ESP_OK;
 }
 
-esp_err_t rf_set_listening(bool on)
+esp_err_t radio_set_listening(bool on)
 {
     xSemaphoreTake(s_radio, portMAX_DELAY);
     esp_err_t err = on ? cc1101_rx() : cc1101_idle();
@@ -180,17 +180,17 @@ esp_err_t rf_set_listening(bool on)
     return err;
 }
 
-bool rf_listening(void)
+bool radio_listening(void)
 {
     return s_listening;
 }
 
-bool rf_next_capture(rf_capture_t *out, TickType_t wait)
+bool radio_next_capture(radio_capture_t *out, TickType_t wait)
 {
     return xQueueReceive(s_captures, out, wait) == pdTRUE;
 }
 
-void rf_capture_free(rf_capture_t *c)
+void radio_capture_free(radio_capture_t *c)
 {
     free(c->durations);
     c->durations = NULL;
@@ -229,7 +229,7 @@ static size_t to_symbols(const uint32_t *d, size_t n, rmt_symbol_word_t *sym, si
     return s;
 }
 
-esp_err_t rf_transmit(const uint32_t *durations, size_t count)
+esp_err_t radio_transmit(const uint32_t *durations, size_t count)
 {
     ESP_RETURN_ON_FALSE(durations && count, ESP_ERR_INVALID_ARG, TAG, "empty pulse train");
     size_t max = count + 16;
