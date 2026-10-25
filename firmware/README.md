@@ -105,6 +105,8 @@ At the `fanwave>` prompt:
 | `freq 303.9` | Change frequency (MHz) |
 | `mod ook` / `mod fsk` | Change modulation |
 | `listen on` / `listen off` | Start or stop capturing |
+| `scan` / `scan 430 437` / `scan 300 348 15` | Find a remote's frequency: stay still, then hold a button when asked (range in MHz, hold time in seconds) |
+| `threshold` / `threshold -95` | Show or set the noise threshold for undecoded bursts; saved |
 | `protocols` | List the decoders |
 | `send pt2262 3A5C16 24 8` | Encode a code and transmit it (protocol, hex, bits, repeats) |
 | `replay 3` | Retransmit the last capture exactly as recorded |
@@ -116,6 +118,18 @@ Every capture is logged with its timing and any decoder matches:
 I (5120) fanwave: capture: 100 marks, 98 ms, short 352 µs, long 1047 µs, gap 10871 µs, RSSI -52 dBm
 I (5120) fanwave:   pt2262: 0x3A5C16 (24 bits, 4 repeats, base 349 µs, 95%)
 ```
+
+Undecoded bursts weaker than the noise threshold are dropped, and logged so
+they're not silent: up to five a second, then a count of the rest.
+
+```
+I (7311) fanwave: filtered as noise: 40 edges at -86 dBm (threshold -80 dBm)
+I (8020) fanwave: filtered 12 more as noise in the last second (strongest -83 dBm)
+```
+
+If a remote never shows up, `scan` it first. If it's found but presses still
+don't appear, compare its level with the threshold and lower it. Both are also
+in the app, under RF Lab.
 
 ## Layout
 

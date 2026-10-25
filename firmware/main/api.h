@@ -12,3 +12,5 @@ esp_err_t api_start(void);
 void api_broadcast(cJSON *message);
 void api_broadcast_fan(cJSON *fan);
 void api_broadcast_capture(const capture_t *capture);
+/** Summary of the bursts dropped as noise over the last period_ms. */
+void api_broadcast_filtered(unsigned count, int strongest_dbm, int threshold_dbm, uint32_t period_ms);

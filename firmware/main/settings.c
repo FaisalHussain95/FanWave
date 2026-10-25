@@ -26,3 +26,23 @@ void settings_save_led(const status_settings_t *s)
     }
     nvs_close(h);
 }
+
+int settings_load_min_rssi(int fallback)
+{
+    nvs_handle_t h;
+    if (nvs_open("fanwave", NVS_READONLY, &h) != ESP_OK) return fallback;
+    int32_t v;
+    if (nvs_get_i32(h, "min_rssi", &v) != ESP_OK) v = fallback;
+    nvs_close(h);
+    return (int)v;
+}
+
+void settings_save_min_rssi(int dbm)
+{
+    nvs_handle_t h;
+    if (nvs_open("fanwave", NVS_READWRITE, &h) != ESP_OK) return;
+    if (nvs_set_i32(h, "min_rssi", dbm) != ESP_OK || nvs_commit(h) != ESP_OK) {
+        ESP_LOGW(TAG, "couldn't save the noise threshold");
+    }
+    nvs_close(h);
+}

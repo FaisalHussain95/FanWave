@@ -3,12 +3,15 @@ import type {
   Capture,
   Fan,
   FanState,
+  FilteredReport,
   HubInfo,
   LearnSlot,
   LedSettings,
   ProtocolMatch,
   ReceiverState,
   Room,
+  ScanOptions,
+  ScanStatus,
   WifiNetwork,
 } from './types';
 
@@ -55,6 +58,14 @@ export interface HubApi {
   /** Subscribe to new captures. Returns an unsubscribe function. */
   onCapture(cb: (capture: Capture) => void): () => void;
   analyze(captureId: number): Promise<ProtocolMatch[]>;
+  /** Subscribe to summaries of the bursts the hub drops as noise. Returns an unsubscribe function. */
+  onFiltered(cb: (report: FilteredReport) => void): () => void;
+  /**
+   * Find a remote's frequency: the hub measures the background, then asks for
+   * a button to be held. onProgress sees every update; resolves once the scan
+   * is done, failed or cancelled. Aborting the signal cancels it.
+   */
+  scanFrequency(opts: ScanOptions, onProgress: (status: ScanStatus) => void, signal: AbortSignal): Promise<ScanStatus>;
 
   /** Listen for a remote during pairing. Returns a stop function. */
   listenForRemote(cb: (signal: PairSignal) => void): () => void;

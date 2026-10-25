@@ -50,6 +50,17 @@ esp_err_t cc1101_idle(void);
 esp_err_t cc1101_rx(void);
 esp_err_t cc1101_tx(void);
 
+/**
+ * Retune and enter RX, rewriting only the frequency and its VCO calibration
+ * settings; everything else stays as cc1101_configure() left it. Quick enough
+ * to step across a band. RX starts after a ~800 µs calibration: poll
+ * cc1101_in_rx() before trusting cc1101_rssi_dbm().
+ */
+esp_err_t cc1101_tune_rx(uint32_t hz);
+
+/** True once the chip has finished calibrating and is receiving. */
+bool cc1101_in_rx(void);
+
 /** Received signal strength right now, in dBm. Only meaningful in RX. */
 int cc1101_rssi_dbm(void);
 

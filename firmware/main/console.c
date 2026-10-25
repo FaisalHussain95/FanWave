@@ -11,10 +11,20 @@
 #include "esp_log.h"
 #include "fw_protocol.h"
 #include "hub.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "rf.h"
+#include "freq_scan.h"
 #include "status_led.h"
 
 #define MAX_TX 4096
+
+static const char *result(esp_err_t err)
+{
+    if (err == ESP_OK) return "ok";
+    if (err == ESP_ERR_INVALID_STATE && hub_scanning()) return "busy: a frequency scan is running";
+    return esp_err_to_name(err);
+}
 
 static int cmd_status(int argc, char **argv)
 {
@@ -26,6 +36,8 @@ static int cmd_status(int argc, char **argv)
     printf("frequency: %.3f MHz %s\n", c.frequency_hz / 1e6, c.modulation == CC1101_MOD_OOK ? "OOK" : "2-FSK");
     printf("listening: %s\n", radio_listening() ? "yes" : "no");
     if (radio_listening()) printf("rssi:      %d dBm\n", cc1101_rssi_dbm());
+    printf("threshold: %d dBm (undecoded bursts weaker than this are dropped)\n", hub_min_rssi());
+    if (hub_scanning()) printf("scanning:  yes\n");
     return 0;
 }
 
@@ -43,7 +55,7 @@ static int cmd_freq(int argc, char **argv)
         return 1;
     }
     esp_err_t err = hub_set_radio(&c);
-    printf("%s\n", err == ESP_OK ? "ok" : esp_err_to_name(err));
+    printf("%s\n", result(err));
     return err != ESP_OK;
 }
 
@@ -57,7 +69,7 @@ static int cmd_mod(int argc, char **argv)
         return 1;
     }
     esp_err_t err = hub_set_radio(&c);
-    printf("%s\n", err == ESP_OK ? "ok" : esp_err_to_name(err));
+    printf("%s\n", result(err));
     return err != ESP_OK;
 }
 
@@ -67,9 +79,71 @@ static int cmd_listen(int argc, char **argv)
         printf("usage: listen on|off\n");
         return 1;
     }
-    esp_err_t err = radio_set_listening(strcmp(argv[1], "on") == 0);
-    printf("%s\n", err == ESP_OK ? "ok" : esp_err_to_name(err));
+    esp_err_t err = hub_set_listening(strcmp(argv[1], "on") == 0);
+    printf("%s\n", result(err));
     return err != ESP_OK;
+}
+
+static int cmd_threshold(int argc, char **argv)
+{
+    if (argc == 1) {
+        printf("%d dBm: undecoded bursts weaker than this are dropped as noise\n", hub_min_rssi());
+        return 0;
+    }
+    char *end;
+    long dbm = strtol(argv[1], &end, 10);
+    if (argc != 2 || *end || hub_set_min_rssi((int)dbm) != ESP_OK) {
+        printf("usage: threshold [dBm], %d to %d, e.g. threshold -95\n", HUB_MIN_RSSI_LOWEST, HUB_MIN_RSSI_HIGHEST);
+        return 1;
+    }
+    printf("ok, saved\n");
+    return 0;
+}
+
+static int cmd_scan(int argc, char **argv)
+{
+    freq_scan_request_t r = freq_scan_default_request();
+    if (argc == 2 || argc > 4) {
+        printf("usage: scan [from MHz] [to MHz] [hold seconds]\n"
+               "  e.g. scan, scan 430 437, scan 300 348 15\n");
+        return 1;
+    }
+    if (argc >= 3) {
+        r.from_hz = (uint32_t)(atof(argv[1]) * 1e6 + 0.5);
+        r.to_hz = (uint32_t)(atof(argv[2]) * 1e6 + 0.5);
+    }
+    if (argc == 4) r.hold_ms = (uint32_t)(atof(argv[3]) * 1000);
+    char err[96] = "";
+    if (freq_scan_start(&r, err) != ESP_OK) {
+        printf("%s\n", err);
+        return 1;
+    }
+    // Follow along until it finishes; freq_scan.c logs the result.
+    freq_scan_state_t shown = FREQ_SCAN_IDLE;
+    freq_scan_status_t s;
+    do {
+        s = freq_scan_status();
+        if (s.state != shown) {
+            shown = s.state;
+            if (s.state == FREQ_SCAN_QUIET) {
+                printf("Scanning %.3f-%.3f MHz in %lu kHz steps.\n"
+                       "Measuring the background for %lu s: don't press anything...\n",
+                       s.request.from_hz / 1e6, s.request.to_hz / 1e6, (unsigned long)(s.step_hz / 1000),
+                       (unsigned long)(s.request.quiet_ms / 1000));
+            } else if (s.state == FREQ_SCAN_HOLD) {
+                printf("Now HOLD a button on the remote (%lu s)...\n", (unsigned long)(s.request.hold_ms / 1000));
+            } else if (s.state == FREQ_SCAN_REFINE) {
+                printf("Keep holding: narrowing down near %.3f MHz...\n", s.candidate_hz / 1e6);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    } while (!freq_scan_finished(s.state));
+
+    if (s.state == FREQ_SCAN_FAILED) printf("Scan failed: %s\n", s.error);
+    else if (s.state == FREQ_SCAN_CANCELLED) printf("Scan cancelled.\n");
+    else if (s.found) printf("Found %.3f MHz. Listen there with: freq %.3f\n", s.frequency_hz / 1e6, s.frequency_hz / 1e6);
+    else printf("Nothing stood out from the background. Hold the remote closer and try again, or scan another range.\n");
+    return s.state == FREQ_SCAN_DONE && s.found ? 0 : 1;
 }
 
 static int cmd_protocols(int argc, char **argv)
@@ -108,7 +182,7 @@ static int cmd_send(int argc, char **argv)
     size_t n = fw_encode(p, bits, (uint8_t)count, (uint16_t)repeats, (uint16_t)base, d, MAX_TX);
     esp_err_t err = n ? hub_transmit(d, n) : ESP_ERR_INVALID_SIZE;
     free(d);
-    printf("%s\n", err == ESP_OK ? "sent" : esp_err_to_name(err));
+    printf("%s\n", err == ESP_OK ? "sent" : result(err));
     return err != ESP_OK;
 }
 
@@ -128,7 +202,7 @@ static int cmd_replay(int argc, char **argv)
     esp_err_t err = ESP_OK;
     for (int i = 0; i < times && err == ESP_OK; i++) err = hub_transmit(d, n);
     free(d);
-    printf("%s\n", err == ESP_OK ? "sent" : esp_err_to_name(err));
+    printf("%s\n", err == ESP_OK ? "sent" : result(err));
     return err != ESP_OK;
 }
 
@@ -169,6 +243,10 @@ void console_start(void)
         {.command = "freq", .help = "Set the radio frequency in MHz", .hint = "<MHz>", .func = cmd_freq},
         {.command = "mod", .help = "Set modulation", .hint = "ook|fsk", .func = cmd_mod},
         {.command = "listen", .help = "Start or stop capturing", .hint = "on|off", .func = cmd_listen},
+        {.command = "threshold", .help = "Show or set the noise threshold for undecoded bursts (saved)",
+         .hint = "[dBm]", .func = cmd_threshold},
+        {.command = "scan", .help = "Find a remote's frequency: stay still, then hold a button when asked",
+         .hint = "[from MHz] [to MHz] [hold s]", .func = cmd_scan},
         {.command = "protocols", .help = "List known protocols", .func = cmd_protocols},
         {.command = "send", .help = "Encode and transmit a code",
          .hint = "<protocol> <hex> <bits> [repeats] [base_us]", .func = cmd_send},

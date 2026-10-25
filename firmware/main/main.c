@@ -10,6 +10,7 @@
 #include "captures.h"
 #include "cc1101.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "fans.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -32,9 +33,17 @@ static cc1101_config_t s_radio;
 static bool s_radio_ok;
 static uint32_t *s_last;
 static size_t s_last_count;
+static volatile int s_min_rssi = CONFIG_FANWAVE_RF_MIN_RSSI;
+static volatile bool s_scanning; // written with s_tx_lock held
+static bool s_scan_was_listening;
 
 esp_err_t hub_set_radio(const cc1101_config_t *config)
 {
+    xSemaphoreTake(s_tx_lock, portMAX_DELAY);
+    if (s_scanning) {
+        xSemaphoreGive(s_tx_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     bool listening = radio_listening();
     esp_err_t err = radio_set_listening(false);
     if (err == ESP_OK) err = cc1101_configure(config);
@@ -47,7 +56,63 @@ esp_err_t hub_set_radio(const cc1101_config_t *config)
         esp_err_t rx = radio_set_listening(true);
         if (err == ESP_OK) err = rx;
     }
+    xSemaphoreGive(s_tx_lock);
     return err;
+}
+
+esp_err_t hub_set_listening(bool on)
+{
+    xSemaphoreTake(s_tx_lock, portMAX_DELAY);
+    esp_err_t err = s_scanning ? ESP_ERR_INVALID_STATE : radio_set_listening(on);
+    xSemaphoreGive(s_tx_lock);
+    return err;
+}
+
+int hub_min_rssi(void)
+{
+    return s_min_rssi;
+}
+
+esp_err_t hub_set_min_rssi(int dbm)
+{
+    if (dbm < HUB_MIN_RSSI_LOWEST || dbm > HUB_MIN_RSSI_HIGHEST) return ESP_ERR_INVALID_ARG;
+    if (dbm == s_min_rssi) return ESP_OK;
+    s_min_rssi = dbm;
+    settings_save_min_rssi(dbm);
+    ESP_LOGI(TAG, "noise threshold now %d dBm", dbm);
+    return ESP_OK;
+}
+
+esp_err_t hub_scan_begin(void)
+{
+    if (!s_radio_ok) return ESP_ERR_INVALID_STATE;
+    // Taking the transmit lock waits out any transmission in progress.
+    xSemaphoreTake(s_tx_lock, portMAX_DELAY);
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (!s_scanning) {
+        s_scan_was_listening = radio_listening();
+        err = radio_set_listening(false);
+        if (err == ESP_OK) s_scanning = true;
+    }
+    xSemaphoreGive(s_tx_lock);
+    return err;
+}
+
+void hub_scan_end(void)
+{
+    xSemaphoreTake(s_tx_lock, portMAX_DELAY);
+    // The scan only retuned the chip; configuring it again restores the receiver's frequency.
+    cc1101_config_t radio = hub_radio();
+    esp_err_t err = cc1101_configure(&radio);
+    if (err == ESP_OK && s_scan_was_listening) err = radio_set_listening(true);
+    if (err != ESP_OK) ESP_LOGE(TAG, "couldn't restore the receiver after a scan: %s", esp_err_to_name(err));
+    s_scanning = false;
+    xSemaphoreGive(s_tx_lock);
+}
+
+bool hub_scanning(void)
+{
+    return s_scanning;
 }
 
 cc1101_config_t hub_radio(void)
@@ -81,8 +146,11 @@ esp_err_t hub_transmit(const uint32_t *durations, size_t count)
 {
     if (!s_radio_ok) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(s_tx_lock, portMAX_DELAY);
-    status_led_flash(STATUS_FLASH_TX);
-    esp_err_t err = radio_transmit(durations, count);
+    esp_err_t err = ESP_ERR_INVALID_STATE;
+    if (!s_scanning) {
+        status_led_flash(STATUS_FLASH_TX);
+        err = radio_transmit(durations, count);
+    }
     xSemaphoreGive(s_tx_lock);
     return err;
 }
@@ -96,6 +164,10 @@ esp_err_t hub_transmit_on(const cc1101_config_t *radio, const uint32_t *duration
 {
     if (!s_radio_ok) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(s_tx_lock, portMAX_DELAY);
+    if (s_scanning) {
+        xSemaphoreGive(s_tx_lock);
+        return ESP_ERR_INVALID_STATE;
+    }
     cc1101_config_t receiver = hub_radio();
     bool switch_radio = !same_radio(radio, &receiver);
     esp_err_t err = switch_radio ? cc1101_configure(radio) : ESP_OK;
@@ -139,15 +211,61 @@ static void log_capture(const capture_t *c)
     if (!c->match_count) ESP_LOGI(TAG, "  no decoder matched; kept as raw");
 }
 
+// Bursts dropped as noise are logged one by one, up to FILTER_LOG_PER_S a
+// second so a noisy band can't bury the console, and reported to the web app
+// as a summary every FILTER_REPORT_MS.
+#define FILTER_LOG_PER_S 5
+#define FILTER_REPORT_MS 2000
+
+typedef struct {
+    unsigned count;
+    int strongest;
+} filter_tally_t;
+
+static void tally(filter_tally_t *t, int rssi)
+{
+    if (t->count++ == 0 || rssi > t->strongest) t->strongest = rssi;
+}
+
 static void capture_task(void *arg)
 {
+    filter_tally_t second = {0}, hidden = {0}, report = {0};
+    int64_t second_start = esp_timer_get_time(), report_start = second_start;
     for (;;) {
         radio_capture_t rf;
-        if (!radio_next_capture(&rf, portMAX_DELAY)) continue;
+        bool got = radio_next_capture(&rf, pdMS_TO_TICKS(250));
+
+        int64_t now = esp_timer_get_time();
+        if (now - second_start >= 1000000) {
+            if (hidden.count) {
+                ESP_LOGI(TAG, "filtered %u more as noise in the last second (strongest %d dBm)", hidden.count,
+                         hidden.strongest);
+            }
+            second = hidden = (filter_tally_t){0};
+            second_start = now;
+        }
+        if (now - report_start >= FILTER_REPORT_MS * 1000LL) {
+            if (report.count) {
+                api_broadcast_filtered(report.count, report.strongest, hub_min_rssi(),
+                                       (uint32_t)((now - report_start) / 1000));
+            }
+            report = (filter_tally_t){0};
+            report_start = now;
+        }
+        if (!got) continue;
+
         // Background noise: weak and undecodable.
         fw_match_t probe;
-        if (rf.rssi_dbm < CONFIG_FANWAVE_RF_MIN_RSSI && fw_decode(rf.durations, rf.count, &probe, 1) == 0) {
-            ESP_LOGD(TAG, "dropped %u-edge burst at %d dBm", (unsigned)rf.count, rf.rssi_dbm);
+        int threshold = hub_min_rssi();
+        if (rf.rssi_dbm < threshold && fw_decode(rf.durations, rf.count, &probe, 1) == 0) {
+            tally(&report, rf.rssi_dbm);
+            if (second.count < FILTER_LOG_PER_S) {
+                ESP_LOGI(TAG, "filtered as noise: %u edges at %d dBm (threshold %d dBm)", (unsigned)rf.count,
+                         rf.rssi_dbm, threshold);
+                tally(&second, rf.rssi_dbm);
+            } else {
+                tally(&hidden, rf.rssi_dbm);
+            }
             radio_capture_free(&rf);
             continue;
         }
@@ -171,6 +289,8 @@ static void start_radio(void)
         .miso = CONFIG_FANWAVE_PIN_MISO,
         .cs = CONFIG_FANWAVE_PIN_CS,
     };
+    s_min_rssi = settings_load_min_rssi(CONFIG_FANWAVE_RF_MIN_RSSI);
+    if (s_min_rssi < HUB_MIN_RSSI_LOWEST || s_min_rssi > HUB_MIN_RSSI_HIGHEST) s_min_rssi = CONFIG_FANWAVE_RF_MIN_RSSI;
     s_radio = cc1101_default_config();
     s_radio.frequency_hz = (uint32_t)CONFIG_FANWAVE_RF_FREQUENCY_KHZ * 1000;
 
