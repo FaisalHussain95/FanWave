@@ -48,9 +48,14 @@ class AppState {
     });
   }
 
-  /** Show onboarding: first run of this browser, or the hub is in setup mode and we're on its access point. */
+  /**
+   * Show onboarding until the hub is on a network, unless this browser chose to
+   * run it offline. Ask the hub rather than trusting the stored flag alone: that
+   * flag lives in per-origin storage, and finishing setup on 192.168.4.1 leaves
+   * it unset at the hub's home address and at fanwave.local.
+   */
   get needsSetup(): boolean {
-    return !this.setupDone || (!!this.hub?.setupMode && location.hostname === '192.168.4.1');
+    return !this.hub?.wifiNetwork && !this.setupDone;
   }
 
   async load() {
