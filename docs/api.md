@@ -41,6 +41,9 @@ Errors are `{"error": "message"}` with a 4xx/5xx status.
 | `GET /api/fans` | `Fan[]` |
 | `POST /api/fans` | `NewFan` (below) → `Fan` |
 | `POST /api/fans/{id}/command` | Part of `FanState`, e.g. `{"power": true, "speed": 3}`. Transmits the matching learned button and returns the updated `Fan` |
+| `POST /api/fans/{id}/duplicate` | `{name, roomId, address?}` → the new `Fan`: a virtual copy of this fan's remote under another address. `address` is hex (`"0x5A5A5"` or `"5A5A5"`); without it a random unused one is picked. `400` if the fan can't be copied or the address is taken |
+| `POST /api/fans/{id}/pair` | Sends the fan's `pair` button, or `power` if none was learned, three times over about two seconds, for a receiver that has just been powered on. `{"sent": "pair"}`. Doesn't change `commanded` |
+| `DELETE /api/fans/{id}` | Forget the fan and its learned buttons. `204`, and a `fanRemoved` event |
 
 `NewFan` is the pairing result:
 
@@ -58,10 +61,30 @@ Errors are `{"error": "message"}` with a 4xx/5xx status.
 }
 ```
 
+A slot with key `pair` is the remote's pairing button. It isn't a fan
+capability; `POST /api/fans/{id}/pair` sends it.
+
 The hub looks up each `captureId` among its recent captures (the last 20)
 and stores either the decoded frame (protocol, bits, base pulse) or the raw
 timings. The fan is stored with the frequency and modulation the receiver
 was on while pairing.
+
+Every `Fan` also carries fields derived from its buttons: `address` (the
+remote's address, or `null` when a button is raw or the buttons come from more
+than one remote), `copyable` (a virtual copy can be made), `pairCode` (a `pair`
+button was learned) and, on copies, `copyOf` (the original fan's name).
+
+### Virtual remotes
+
+Fixed-code remotes (PT2262/EV1527 and the DL fan family) send the same frame
+for every press: an address that identifies the remote, then the button. A fan
+with a learning receiver remembers the addresses it was paired with. A copy
+keeps every button's command bits and swaps the address (the protocol's
+`address_bits`, 20 for PT2262/EV1527), so it is a remote no physical one
+matches. Pair it by powering the fan on and calling `pair` within the
+receiver's learning window; from then on that fan answers to the copy, and
+other fans of the same model don't. Raw recordings carry no address to change,
+so fans learned that way can't be copied.
 
 Which button a command sends:
 
@@ -148,6 +171,7 @@ Server to client only, one JSON object per text frame:
 ```jsonc
 { "type": "capture", "now": 123456, "capture": { /* Capture */ }, "matches": [ /* ProtocolMatch */ ] }
 { "type": "fan", "fan": { /* Fan */ } }
+{ "type": "fanRemoved", "id": "kitchen" }
 { "type": "scan", "scan": { /* scan status, as above; spectrum only in the final one */ } }
 { "type": "filtered", "count": 12, "strongestDbm": -83, "thresholdDbm": -80, "periodMs": 2000 }
 ```

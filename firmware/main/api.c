@@ -301,9 +301,59 @@ static esp_err_t post_fans(httpd_req_t *req)
     return fan ? send_json(req, "200 OK", fan) : send_error(req, "400 Bad Request", err);
 }
 
+static esp_err_t fan_error(httpd_req_t *req, const char *err)
+{
+    return send_error(req, strcmp(err, "Unknown fan.") == 0 ? "404 Not Found" : "400 Bad Request", err);
+}
+
+static esp_err_t post_fan_duplicate(httpd_req_t *req, const char *id)
+{
+    cJSON *body = read_json(req, 1024);
+    if (!body) return ESP_OK;
+    char err[96] = "";
+    cJSON *fan = fans_duplicate(id, body, err);
+    cJSON_Delete(body);
+    if (!fan) return fan_error(req, err);
+    api_broadcast_fan(cJSON_Duplicate(fan, true));
+    return send_json(req, "200 OK", fan);
+}
+
+static esp_err_t post_fan_pair(httpd_req_t *req, const char *id)
+{
+    if (!same_origin(req)) return send_error(req, "403 Forbidden", "Cross-origin requests are not allowed.");
+    char err[96] = "";
+    const char *key = fans_pair(id, err);
+    if (!key) return fan_error(req, err);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "sent", key);
+    return send_json(req, "200 OK", o);
+}
+
+static esp_err_t delete_fan(httpd_req_t *req)
+{
+    if (!same_origin(req)) return send_error(req, "403 Forbidden", "Cross-origin requests are not allowed.");
+    const char *prefix = "/api/fans/";
+    const char *id = req->uri + strlen(prefix);
+    size_t len = strcspn(id, "/?#");
+    if (strncmp(req->uri, prefix, strlen(prefix)) != 0 || !len || len >= 48 || id[len] == '/') {
+        return send_error(req, "404 Not Found", "No such endpoint.");
+    }
+    char fid[48], err[96] = "";
+    memcpy(fid, id, len);
+    fid[len] = '\0';
+    if (fans_remove(fid, err) != ESP_OK) return fan_error(req, err);
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "type", "fanRemoved");
+    cJSON_AddStringToObject(o, "id", fid);
+    api_broadcast(o);
+    return send_no_content(req);
+}
+
 static esp_err_t post_fan_command(httpd_req_t *req)
 {
     char id[48];
+    if (path_id(req->uri, "/api/fans/", "duplicate", id, sizeof(id))) return post_fan_duplicate(req, id);
+    if (path_id(req->uri, "/api/fans/", "pair", id, sizeof(id))) return post_fan_pair(req, id);
     if (!path_id(req->uri, "/api/fans/", "command", id, sizeof(id))) {
         return send_error(req, "404 Not Found", "No such endpoint.");
     }
@@ -609,6 +659,7 @@ esp_err_t api_start(void)
         {.uri = "/api/fans", .method = HTTP_GET, .handler = get_fans},
         {.uri = "/api/fans", .method = HTTP_POST, .handler = post_fans},
         {.uri = "/api/fans/*", .method = HTTP_POST, .handler = post_fan_command},
+        {.uri = "/api/fans/*", .method = HTTP_DELETE, .handler = delete_fan},
         {.uri = "/api/captures", .method = HTTP_GET, .handler = get_captures},
         {.uri = "/api/captures/*", .method = HTTP_GET, .handler = get_analysis},
         {.uri = "/api/receiver", .method = HTTP_GET, .handler = get_receiver},

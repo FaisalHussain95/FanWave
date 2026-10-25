@@ -24,6 +24,23 @@ cJSON *fans_add_room(const char *name, char *err);
 cJSON *fans_add(const cJSON *new_fan, const cc1101_config_t *radio, char *err);
 cJSON *fans_command(const char *id, const cJSON *patch, char *err);
 
+/**
+ * A virtual remote: a new fan with the same buttons as fan `id`, sent under
+ * another address. Body {name, roomId, address?}; without an address a random
+ * unused one is picked. Only for fans whose buttons all decode from one remote.
+ */
+cJSON *fans_duplicate(const char *id, const cJSON *body, char *err);
+
+/**
+ * Send the fan's pair button (or power, if none was learned) a few times, for
+ * a fan receiver that has just been powered on and is listening for a new
+ * remote. Returns the key sent, or NULL on failure. Doesn't change the fan's state.
+ */
+const char *fans_pair(const char *id, char *err);
+
+/** Forget a fan and its learned buttons. */
+esp_err_t fans_remove(const char *id, char *err);
+
 /** If the capture matches a learned code, update that fan's confirmed state and return a copy of it. */
 cJSON *fans_observe(const capture_t *capture);
 

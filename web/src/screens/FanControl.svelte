@@ -46,7 +46,7 @@
     <div class="screen-body tight">
       <div class="top">
         <a class="btn btn-icon btn-ghost icon-btn" href={href.dashboard} aria-label="Back"><Icon name="caret-left" /></a>
-        <a class="btn btn-icon btn-ghost icon-btn" href={href.rooms} aria-label="Manage fans"><Icon name="dots-three" /></a>
+        <a class="btn btn-icon btn-ghost icon-btn" href={href.remote(fan.id)} aria-label="Remote: pair, copy or remove"><Icon name="dots-three" /></a>
       </div>
 
       <div class="title">

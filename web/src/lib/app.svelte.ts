@@ -46,6 +46,7 @@ class AppState {
       if (i >= 0) this.fans[i] = fan;
       else this.fans.push(fan);
     });
+    api.onFanRemoved((id) => this.forgetFan(id));
   }
 
   /**
@@ -145,6 +146,25 @@ class AppState {
       hub.led = before;
       this.notify(`Couldn't change the LED: ${e instanceof Error ? e.message : e}`);
     }
+  }
+
+  private forgetFan(id: string) {
+    this.fans = this.fans.filter((f) => f.id !== id);
+    if (this.lastFanId === id) {
+      this.lastFanId = null;
+      write(LAST_FAN, '');
+    }
+  }
+
+  async duplicateFan(fanId: string, copy: { name: string; roomId: string; address?: string }) {
+    const fan = await api.duplicateFan(fanId, copy);
+    if (!this.fans.some((f) => f.id === fan.id)) this.fans.push(fan);
+    return fan;
+  }
+
+  async removeFan(fanId: string) {
+    await api.removeFan(fanId);
+    this.forgetFan(fanId);
   }
 
   startPairing(draft: Partial<PairDraft> = {}) {

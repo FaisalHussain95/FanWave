@@ -44,6 +44,14 @@ export interface HubApi {
   /** Transmit a command. Resolves with the fan's new commanded state. */
   command(fanId: string, patch: Partial<FanState>): Promise<Fan>;
   addFan(fan: NewFan): Promise<Fan>;
+  /** A virtual copy of a fan's remote under another address (random when none is given). */
+  duplicateFan(fanId: string, copy: { name: string; roomId: string; address?: string }): Promise<Fan>;
+  /** Send the fan's pair button (or power) for a receiver in pairing mode. Resolves with the button sent. */
+  pairFan(fanId: string): Promise<{ sent: string }>;
+  /** Forget a fan and its learned buttons. */
+  removeFan(fanId: string): Promise<void>;
+  /** Called when a fan is removed, from this or another device. Returns an unsubscribe function. */
+  onFanRemoved(cb: (fanId: string) => void): () => void;
 
   /** Called when the hub reports a fan changed, e.g. its remote was used. Returns an unsubscribe function. */
   onFan(cb: (fan: Fan) => void): () => void;

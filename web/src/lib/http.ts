@@ -21,9 +21,10 @@ import type {
 
 type CaptureEvent = { type: 'capture'; now: number; capture: Capture; matches: ProtocolMatch[] };
 type FanEvent = { type: 'fan'; fan: Fan };
+type FanRemovedEvent = { type: 'fanRemoved'; id: string };
 type ScanEvent = { type: 'scan'; scan: ScanStatus };
 type FilteredEvent = { type: 'filtered' } & FilteredReport;
-type HubEvent = CaptureEvent | FanEvent | ScanEvent | FilteredEvent;
+type HubEvent = CaptureEvent | FanEvent | FanRemovedEvent | ScanEvent | FilteredEvent;
 
 const scanEnded = (s: ScanStatus) => s.state === 'done' || s.state === 'failed' || s.state === 'cancelled';
 
@@ -145,6 +146,24 @@ export class HttpHub implements HubApi {
 
   async addFan(fan: NewFan) {
     return this.fan(await this.post<Fan>('/api/fans', fan));
+  }
+
+  async duplicateFan(fanId: string, copy: { name: string; roomId: string; address?: string }) {
+    return this.fan(await this.post<Fan>(`/api/fans/${encodeURIComponent(fanId)}/duplicate`, copy));
+  }
+
+  pairFan(fanId: string) {
+    return this.post<{ sent: string }>(`/api/fans/${encodeURIComponent(fanId)}/pair`);
+  }
+
+  async removeFan(fanId: string) {
+    await this.request<void>(`/api/fans/${encodeURIComponent(fanId)}`, { method: 'DELETE' });
+  }
+
+  onFanRemoved(cb: (fanId: string) => void) {
+    return this.subscribe((e) => {
+      if (e.type === 'fanRemoved') cb(e.id);
+    });
   }
 
   onFan(cb: (fan: Fan) => void) {

@@ -171,6 +171,12 @@ function mockScanResult(opts: ScanOptions, base: Partial<ScanStatus>): ScanStatu
   };
 }
 
+/** The derived fields the hub adds: address, copyable, pairCode. */
+function annotate(f: Fan): Fan {
+  const address = f.address ?? f.protocolLabel.match(/0x[0-9A-F]+/i)?.[0] ?? null;
+  return { ...f, address, copyable: !!f.protocol && !!address, pairCode: f.pairCode ?? false };
+}
+
 export class MockHub implements HubApi {
   private state = load();
   private captureList = structuredClone(seedCaptures);
@@ -222,7 +228,59 @@ export class MockHub implements HubApi {
 
   async fans() {
     await wait(60);
-    return structuredClone(this.state.fans);
+    return structuredClone(this.state.fans.map(annotate));
+  }
+
+  private fanRemovedSubs = new Set<(id: string) => void>();
+
+  async duplicateFan(fanId: string, copy: { name: string; roomId: string; address?: string }) {
+    await wait(200);
+    const src = this.state.fans.find((f) => f.id === fanId);
+    if (!src) throw new Error('Unknown fan.');
+    if (!annotate(src).copyable) throw new Error('Only remotes whose buttons all decode, from one remote, can be copied.');
+    const norm = (a: string) => '0x' + parseInt(a.replace(/^0x/i, ''), 16).toString(16).toUpperCase().padStart(5, '0');
+    const taken = new Set(this.state.fans.flatMap((f) => { const a = annotate(f).address; return a ? [norm(a)] : []; }));
+    let address: string;
+    if (copy.address) {
+      const v = parseInt(copy.address.replace(/^0x/i, ''), 16);
+      if (!/^(0x)?[0-9a-f]+$/i.test(copy.address) || v > 0xfffff) throw new Error('The address must be hex, at most 20 bits (0x0 to 0xFFFFF).');
+      address = '0x' + v.toString(16).toUpperCase().padStart(5, '0');
+      if (taken.has(address)) throw new Error('Another fan already uses that address.');
+    } else {
+      do address = '0x' + Math.floor(1 + Math.random() * 0xffffe).toString(16).toUpperCase().padStart(5, '0');
+      while (taken.has(address));
+    }
+    const base = copy.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'fan';
+    let id = base;
+    for (let n = 2; this.state.fans.some((f) => f.id === id); n++) id = `${base}-${n}`;
+    const fan: Fan = {
+      ...structuredClone(src), id, name: copy.name, roomId: copy.roomId, address, copyOf: src.name,
+      protocolLabel: `${(src.protocol ?? '').toUpperCase()} · ${address}`,
+      commanded: { ...off }, confirmed: null, lastSentAt: null,
+    };
+    this.state.fans.push(fan);
+    this.save();
+    return structuredClone(annotate(fan));
+  }
+
+  async pairFan(fanId: string) {
+    await wait(1200);
+    const fan = this.state.fans.find((f) => f.id === fanId);
+    if (!fan) throw new Error('Unknown fan.');
+    return { sent: fan.pairCode ? 'pair' : 'power' };
+  }
+
+  async removeFan(fanId: string) {
+    await wait(150);
+    if (!this.state.fans.some((f) => f.id === fanId)) throw new Error('Unknown fan.');
+    this.state.fans = this.state.fans.filter((f) => f.id !== fanId);
+    this.save();
+    for (const cb of this.fanRemovedSubs) cb(fanId);
+  }
+
+  onFanRemoved(cb: (id: string) => void) {
+    this.fanRemovedSubs.add(cb);
+    return () => this.fanRemovedSubs.delete(cb);
   }
 
   async command(fanId: string, patch: Partial<FanState>) {

@@ -32,6 +32,14 @@ export interface Fan {
   confirmed: FanState | null;
   /** Epoch ms of the last command sent, or null if never. */
   lastSentAt: number | null;
+  /** The remote's address, e.g. "0x218C0", when every button decodes from one remote. */
+  address?: string | null;
+  /** A virtual copy with another address can be made of this remote. */
+  copyable?: boolean;
+  /** A pair button was learned. */
+  pairCode?: boolean;
+  /** Name of the fan this one is a virtual copy of. */
+  copyOf?: string;
 }
 
 export interface Room {
@@ -177,7 +185,8 @@ export interface ScanStatus {
 export interface LearnSlot {
   key: string;
   label: string;
-  capability: Capability;
+  /** What the button does; 'pair' is the remote's pairing button. */
+  capability: Capability | 'pair';
   /** Code as shown to the user, e.g. "0x3A5C1 · 0110". */
   code: string | null;
   /** The capture the hub stores this button from. */

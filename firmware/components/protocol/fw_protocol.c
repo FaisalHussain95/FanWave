@@ -302,6 +302,25 @@ size_t fw_encode(const fw_protocol_t *p, uint64_t bits, uint8_t bit_count, uint1
     return w;
 }
 
+bool fw_frame_address(const fw_protocol_t *p, uint64_t bits, uint8_t bit_count, uint64_t *address)
+{
+    if (!p || !p->address_bits || p->address_bits >= bit_count || bit_count > 64) return false;
+    *address = bits >> (bit_count - p->address_bits);
+    return true;
+}
+
+bool fw_frame_with_address(const fw_protocol_t *p, uint64_t bits, uint8_t bit_count, uint64_t address,
+                           uint64_t *out)
+{
+    uint64_t old;
+    if (!fw_frame_address(p, bits, bit_count, &old)) return false;
+    if (p->address_bits < 64 && address >> p->address_bits) return false;
+    uint8_t command_bits = bit_count - p->address_bits;
+    uint64_t command = bits & ((1ULL << command_bits) - 1);
+    *out = (address << command_bits) | command;
+    return true;
+}
+
 static int cmp_u32(const void *a, const void *b)
 {
     uint32_t x = *(const uint32_t *)a, y = *(const uint32_t *)b;

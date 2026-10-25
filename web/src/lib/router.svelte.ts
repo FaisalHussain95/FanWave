@@ -3,6 +3,7 @@
 export type Route =
   | { name: 'dashboard' }
   | { name: 'fan'; id: string }
+  | { name: 'remote'; id: string }
   | { name: 'rooms' }
   | { name: 'settings' }
   | { name: 'lab' }
@@ -15,7 +16,8 @@ function parse(hash: string): Route {
   const parts = hash.replace(/^#\/?/, '').split('/').filter(Boolean).map(decodeURIComponent);
   switch (parts[0]) {
     case 'fan':
-      return parts[1] ? { name: 'fan', id: parts[1] } : { name: 'dashboard' };
+      if (!parts[1]) return { name: 'dashboard' };
+      return parts[2] === 'remote' ? { name: 'remote', id: parts[1] } : { name: 'fan', id: parts[1] };
     case 'rooms':
       return { name: 'rooms' };
     case 'settings':
@@ -44,6 +46,7 @@ window.addEventListener('hashchange', () => {
 export const href = {
   dashboard: '#/',
   fan: (id: string) => `#/fan/${encodeURIComponent(id)}`,
+  remote: (id: string) => `#/fan/${encodeURIComponent(id)}/remote`,
   rooms: '#/rooms',
   settings: '#/settings',
   lab: '#/lab',
