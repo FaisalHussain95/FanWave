@@ -38,6 +38,13 @@ esp_err_t radio_init(const radio_config_t *config);
 esp_err_t radio_set_listening(bool on);
 bool radio_listening(void);
 
+/**
+ * Level changes per second on the receive pin (GDO2), over the last full
+ * second; 0 when not listening. A listening CC1101 always produces some, even
+ * from noise alone, so a steady 0 means nothing is reaching the pin.
+ */
+uint32_t radio_edge_rate(void);
+
 /** Wait for the next capture. On success the caller owns it and must call radio_capture_free(). */
 bool radio_next_capture(radio_capture_t *out, TickType_t wait);
 void radio_capture_free(radio_capture_t *capture);

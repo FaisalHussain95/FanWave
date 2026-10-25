@@ -81,11 +81,21 @@ fan's learned codes, it updates `confirmed` and pushes a `fan` event.
 |---|---|
 | `GET /api/captures` | `{now, captures: Capture[]}`, newest first, up to 20 |
 | `GET /api/captures/{id}/analysis` | `ProtocolMatch[]`, best first; empty when nothing decodes |
-| `GET /api/receiver` | `{listening, modulation, frequencyMHz, minRssiDbm, scanning}` |
+| `GET /api/receiver` | `{listening, modulation, frequencyMHz, minRssiDbm, scanning, edgesPerSecond}`. `edgesPerSecond` counts level changes on the receive pin (GDO2) over the last second; noise alone keeps it well above 0 while listening, so a steady 0 means the pin is not connected |
 | `POST /api/receiver` | Any of `{listening, modulation, frequencyMHz, minRssiDbm}`. Returns the new state. `409` if a scan is running and the radio settings would change |
 | `POST /api/receiver/scan` | Start a frequency scan: `{fromMHz?, toMHz?, quietSeconds?, holdSeconds?}` (defaults 300, 464, 3, 9). `202` with the scan's status; `409` if one is already running |
 | `GET /api/receiver/scan` | The current or last scan's status, with `spectrum` once done |
 | `POST /api/receiver/scan/cancel` | Stop a running scan. `204` |
+
+### How captures are cut
+
+The receiver streams: the CC1101 turns background noise into a constant run
+of edges on GDO2, so waiting for silence to end a capture would wait forever.
+The firmware receives continuously and cuts the stream into captures itself:
+at 20 ms of silence, or once a capture reaches 4096 edges or 300 ms. A held
+button therefore arrives as several captures, each with whole frames to
+decode, and noise arrives as weak, undecodable captures that the threshold
+below drops.
 
 ### Noise threshold
 

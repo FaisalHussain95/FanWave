@@ -101,7 +101,7 @@ At the `fanwave>` prompt:
 
 | Command | What it does |
 |---|---|
-| `status` | Radio found?, frequency, modulation, RSSI |
+| `status` | Radio found?, frequency, modulation, RSSI, edges/s on GDO2 (0 while listening means the receive wire is off), noise threshold |
 | `freq 303.9` | Change frequency (MHz) |
 | `mod ook` / `mod fsk` | Change modulation |
 | `listen on` / `listen off` | Start or stop capturing |
