@@ -5,6 +5,7 @@ import type {
   FanState,
   HubInfo,
   LearnSlot,
+  LedSettings,
   Modulation,
   ProtocolMatch,
   Room,
@@ -54,6 +55,11 @@ export interface HubApi {
   listenForRemote(cb: (signal: PairSignal) => void): () => void;
   /** Wait for the next press of a remote button and resolve with its code. */
   learnButton(slot: LearnSlot, signal: AbortSignal): Promise<string>;
+
+  /** Change status LED settings. Resolves with the settings the hub stored. */
+  setLed(patch: Partial<LedSettings>): Promise<LedSettings>;
+  /** Blink the status LED for a few seconds so the user can find the board. */
+  identify(): Promise<void>;
 
   installUpdate(onProgress: (fraction: number) => void): Promise<void>;
   backup(): Promise<Backup>;

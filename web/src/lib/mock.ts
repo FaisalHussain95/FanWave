@@ -9,6 +9,7 @@ import type {
   FanState,
   HubInfo,
   LearnSlot,
+  LedSettings,
   Modulation,
   ProtocolMatch,
   Room,
@@ -17,6 +18,19 @@ import type {
 import { bitsToHex, splitFrame } from './rf';
 
 const STORE_KEY = 'fanwave.mock.v1';
+const LED_KEY = 'fanwave.mock.led.v1';
+
+const defaultLed: LedSettings = { enabled: true, brightness: 40, idle: 'dim', radioFlashes: true };
+
+function loadLed(): LedSettings {
+  try {
+    const raw = localStorage.getItem(LED_KEY);
+    if (raw) return { ...defaultLed, ...JSON.parse(raw) };
+  } catch {
+    /* storage unavailable or corrupt: use the defaults */
+  }
+  return { ...defaultLed };
+}
 
 const off: FanState = { power: false, speed: 1, light: false, reverse: false, timer: false };
 
@@ -139,6 +153,7 @@ export class MockHub implements HubApi {
     name: 'FanWave‑3F2A', hardware: 'ESP32‑S3 · CC1101', host: 'fanwave.local', online: true,
     uptimeSeconds: 6 * 86400 + 4 * 3600, wifiRssi: -58, heapFreeBytes: 212 * 1024,
     wifiNetwork: 'Maison‑5G', accessPointFallback: true, localOnly: true, radioOk: true,
+    led: loadLed(),
     firmware: '0.8.3', update: { version: '0.9.0', sizeBytes: 1.4 * 1024 * 1024 },
   };
 
@@ -306,6 +321,23 @@ export class MockHub implements HubApi {
         reject(new DOMException('Stopped listening', 'AbortError'));
       });
     });
+  }
+
+  async setLed(patch: Partial<LedSettings>) {
+    await wait(80);
+    const next = { ...this.info.led, ...patch };
+    next.brightness = Math.min(100, Math.max(0, Math.round(next.brightness)));
+    this.info.led = next;
+    try {
+      localStorage.setItem(LED_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable: keep in memory only */
+    }
+    return { ...next };
+  }
+
+  async identify() {
+    await wait(80);
   }
 
   async installUpdate(onProgress: (f: number) => void) {

@@ -6,6 +6,8 @@ import power from '@phosphor-icons/core/assets/regular/power.svg?raw';
 import caretLeft from '@phosphor-icons/core/assets/regular/caret-left.svg?raw';
 import caretRight from '@phosphor-icons/core/assets/regular/caret-right.svg?raw';
 import x from '@phosphor-icons/core/assets/regular/x.svg?raw';
+import sunDim from '@phosphor-icons/core/assets/regular/sun-dim.svg?raw';
+import crosshair from '@phosphor-icons/core/assets/regular/crosshair.svg?raw';
 import lightbulb from '@phosphor-icons/core/assets/regular/lightbulb.svg?raw';
 import arrowsCounterClockwise from '@phosphor-icons/core/assets/regular/arrows-counter-clockwise.svg?raw';
 import timer from '@phosphor-icons/core/assets/regular/timer.svg?raw';
@@ -50,6 +52,8 @@ export const icons = {
   'caret-left': caretLeft,
   'caret-right': caretRight,
   'x': x,
+  'sun-dim': sunDim,
+  'crosshair': crosshair,
   'lightbulb': lightbulb,
   'arrows-counter-clockwise': arrowsCounterClockwise,
   'timer': timer,

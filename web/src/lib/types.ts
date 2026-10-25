@@ -50,8 +50,21 @@ export interface HubInfo {
   accessPointFallback: boolean;
   localOnly: boolean;
   radioOk: boolean;
+  led: LedSettings;
   firmware: string;
   update: { version: string; sizeBytes: number } | null;
+}
+
+/** The board's status LED. See "Status LED" in docs/architecture.md. */
+export interface LedSettings {
+  /** False turns the LED off except for errors. */
+  enabled: boolean;
+  /** 0–100. */
+  brightness: number;
+  /** What to show when online and idle. */
+  idle: 'dim' | 'off';
+  /** Flash on send and receive. */
+  radioFlashes: boolean;
 }
 
 export interface WifiNetwork {

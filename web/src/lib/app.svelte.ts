@@ -1,7 +1,7 @@
 import type { HubApi } from './api';
 import { MockHub } from './mock';
 import { read, write } from './storage';
-import type { Fan, FanState, HubInfo, ProtocolMatch, Room } from './types';
+import type { Fan, FanState, HubInfo, LedSettings, ProtocolMatch, Room } from './types';
 
 export const api: HubApi = new MockHub();
 
@@ -107,6 +107,20 @@ class AppState {
   pickSpeed(fan: Fan, speed: number) {
     if (fan.commanded.power && fan.commanded.speed === speed) return this.command(fan.id, { power: false });
     return this.command(fan.id, { power: true, speed });
+  }
+
+  /** Change LED settings straight away, undoing it if the hub refuses. */
+  async setLed(patch: Partial<LedSettings>) {
+    const hub = this.hub;
+    if (!hub) return;
+    const before = hub.led;
+    hub.led = { ...hub.led, ...patch };
+    try {
+      hub.led = await api.setLed(patch);
+    } catch (e) {
+      hub.led = before;
+      this.notify(`Couldn't change the LED: ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   startPairing(draft: Partial<PairDraft> = {}) {
