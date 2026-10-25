@@ -13,7 +13,7 @@
 
   app.load();
 
-  const route = $derived(!app.setupDone && router.route.name === 'dashboard' ? { name: 'setup' as const } : router.route);
+  const route = $derived(app.needsSetup && router.route.name === 'dashboard' ? { name: 'setup' as const } : router.route);
 </script>
 
 {#if !app.loaded}

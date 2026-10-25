@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Switch from '../components/Switch.svelte';
   import TabBar from '../components/TabBar.svelte';
   import { api, app } from '../lib/app.svelte';
   import { bytes, percent, uptime } from '../lib/format';
@@ -8,8 +9,42 @@
 
   let progress = $state<number | null>(null);
   let fileInput = $state<HTMLInputElement>();
+  let firmwareInput = $state<HTMLInputElement>();
+  let uploadProgress = $state<number | null>(null);
+
+  async function uploadFirmware(e: Event) {
+    const file = (e.currentTarget as HTMLInputElement).files?.[0];
+    if (!file) return;
+    uploadProgress = 0;
+    try {
+      const version = await api.uploadFirmware(file, (f) => (uploadProgress = f));
+      app.notify(`Firmware ${version} installed. The hub is restarting…`);
+      // Give it time to reboot, then reload the app it now serves.
+      setTimeout(() => location.reload(), 8000);
+    } catch (err) {
+      app.notify(err instanceof Error ? err.message : String(err));
+    } finally {
+      uploadProgress = null;
+      if (firmwareInput) firmwareInput.value = '';
+    }
+  }
 
   const hub = $derived(app.hub);
+  // Follows the hub, but tracks the slider while it's dragged; saved on release.
+  let brightness = $derived(app.hub?.led.brightness ?? 0);
+  let identifying = $state(false);
+
+  async function identify() {
+    identifying = true;
+    try {
+      await api.identify();
+      await new Promise((r) => setTimeout(r, 5000));
+    } catch (e) {
+      app.notify(`Couldn't reach the hub: ${e instanceof Error ? e.message : e}`);
+    } finally {
+      identifying = false;
+    }
+  }
 
   async function update() {
     progress = 0;
@@ -88,7 +123,28 @@
           {/if}
         </div>
       {:else}
-        <p class="sub">Firmware {hub.firmware} · up to date</p>
+        <div class="panel">
+          <div class="row">
+            <span class="muted"><Icon name="arrow-circle-up" size="18px" /></span>
+            <span class="grow stack">
+              <span>Firmware {hub.firmware}</span>
+              {#if uploadProgress === null}
+                <span class="hint">Install a new version from a .bin file</span>
+              {:else}
+                <span class="hint">Uploading… {percent(uploadProgress)}. Keep the hub powered.</span>
+              {/if}
+            </span>
+            <button class="btn btn-secondary" style="height:36px" disabled={uploadProgress !== null} onclick={() => firmwareInput?.click()}>
+              Choose file
+            </button>
+          </div>
+          {#if uploadProgress !== null}
+            <div class="progress upload" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow={Math.round(uploadProgress * 100)} aria-label="Firmware upload">
+              <span style:width={percent(uploadProgress)}></span>
+            </div>
+          {/if}
+        </div>
+        <input class="visually-hidden" type="file" accept=".bin,application/octet-stream" tabindex="-1" aria-hidden="true" bind:this={firmwareInput} onchange={uploadFirmware} />
       {/if}
 
       <div class="panel">
@@ -117,6 +173,70 @@
           <span class="value">{hub.localOnly ? 'On' : 'Off'}</span>
         </div>
       </div>
+
+      {@const led = hub.led}
+      <section class="group" aria-labelledby="led-title">
+        <h2 id="led-title" class="group-title">Status LED</h2>
+        <div class="panel">
+          <div class="row">
+            <span class="muted"><Icon name="lightbulb" size="18px" /></span>
+            <span class="grow stack">
+              <span>Status LED</span>
+              <span class="hint">{led.enabled ? 'Shows Wi‑Fi, radio and update status' : 'Off. Errors still show in red'}</span>
+            </span>
+            <Switch label="Status LED" checked={led.enabled} onchange={(v) => app.setLed({ enabled: v })} />
+          </div>
+          <div class="row" class:off={!led.enabled}>
+            <span class="muted"><Icon name="sun-dim" size="18px" /></span>
+            <label for="led-brightness" class="grow">Brightness</label>
+            <input
+              id="led-brightness"
+              class="range"
+              type="range"
+              min="5"
+              max="100"
+              step="5"
+              disabled={!led.enabled}
+              bind:value={brightness}
+              onchange={() => app.setLed({ brightness })}
+            />
+            <span class="value num">{percent(brightness / 100)}</span>
+          </div>
+          <div class="row" class:off={!led.enabled}>
+            <span class="muted"><Icon name="circle" size="18px" /></span>
+            <span class="grow" id="led-idle">When idle</span>
+            <div class="seg" role="group" aria-labelledby="led-idle">
+              {#each [['dim', 'Dim'], ['off', 'Off']] as const as [value, text] (value)}
+                <button
+                  class="seg-opt"
+                  class:on={led.idle === value}
+                  aria-pressed={led.idle === value}
+                  disabled={!led.enabled}
+                  onclick={() => app.setLed({ idle: value })}>{text}</button>
+              {/each}
+            </div>
+          </div>
+          <div class="row" class:off={!led.enabled}>
+            <span class="muted"><Icon name="broadcast" size="18px" /></span>
+            <span class="grow">Flash on send and receive</span>
+            <Switch
+              label="Flash on send and receive"
+              checked={led.radioFlashes}
+              disabled={!led.enabled}
+              onchange={(v) => app.setLed({ radioFlashes: v })}
+            />
+          </div>
+          <button class="row" disabled={identifying} onclick={identify}>
+            <span class="muted"><Icon name="crosshair" size="18px" /></span>
+            <span class="grow stack">
+              <span>Identify hub</span>
+              <span class="hint">Blinks the LED so you can find this board</span>
+            </span>
+            <span class="value">{identifying ? 'Blinking…' : ''}</span>
+          </button>
+        </div>
+      </section>
+
       <input class="visually-hidden" type="file" accept="application/json,.json" tabindex="-1" aria-hidden="true" bind:this={fileInput} onchange={restore} />
     {/if}
   </div>
@@ -140,9 +260,21 @@
   }
   .accent-icon { color: var(--color-accent); display: inline-flex; }
   .progress { height: 6px; border-radius: 3px; background: var(--color-accent-800); overflow: hidden; }
+  .progress.upload { margin: 0 14px 14px; }
   .progress span { display: block; height: 100%; background: var(--color-accent); transition: width 0.15s; }
   .muted { color: var(--color-neutral-400); display: inline-flex; }
   .faint { color: var(--color-neutral-600); display: inline-flex; }
   .grow { flex: 1; }
   .value { font-size: 12px; color: var(--color-neutral-500); }
+  .num { min-width: 34px; text-align: right; font-variant-numeric: tabular-nums; }
+  .hint { font-size: 12px; color: var(--color-neutral-500); }
+  .group { display: flex; flex-direction: column; gap: 8px; }
+  .group-title { margin: 0; font-size: 12px; font-weight: 400; color: var(--color-neutral-400); text-transform: uppercase; letter-spacing: 0.06em; }
+  .row.off { opacity: 0.5; }
+  .range { width: 112px; accent-color: var(--color-accent); }
+  .seg-opt { background: transparent; border: 0; color: var(--color-neutral-400); min-height: 32px; min-width: 48px; justify-content: center; }
+  .seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
+  .seg-opt.on { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+  .seg-opt:disabled { cursor: not-allowed; }
+  button.row:disabled { cursor: default; }
 </style>

@@ -1,0 +1,64 @@
+menu "FanWave"
+
+    menu "Pins"
+        comment "Defaults keep clear of strapping pins (0, 3, 45, 46), USB (19, 20), flash/PSRAM (26-37) and UART0 (43, 44)."
+
+        config FANWAVE_PIN_SCK
+            int "CC1101 SCK"
+            default 12
+        config FANWAVE_PIN_MOSI
+            int "CC1101 MOSI (SI)"
+            default 11
+        config FANWAVE_PIN_MISO
+            int "CC1101 MISO (SO)"
+            default 13
+        config FANWAVE_PIN_CS
+            int "CC1101 CSn"
+            default 10
+        config FANWAVE_PIN_GDO0
+            int "CC1101 GDO0 (radio TX data in)"
+            default 4
+        config FANWAVE_PIN_GDO2
+            int "CC1101 GDO2 (radio RX data out)"
+            default 5
+        config FANWAVE_PIN_LED
+            int "Status LED data (48 on DevKitC-1 v1.0, 38 on v1.1)"
+            default 48
+    endmenu
+
+    config FANWAVE_RF_FREQUENCY_KHZ
+        int "Start-up radio frequency (kHz)"
+        default 433920
+        help
+            433920 for most Chinese remotes; many US ceiling-fan remotes
+            (Hampton Bay, Harbor Breeze, Minka) use about 303000-305000.
+            Change it at run time with the "freq" console command.
+
+    config FANWAVE_AP_PASSWORD
+        string "Setup access point password"
+        default ""
+        help
+            The hub opens a "FanWave-XXXX" access point when it has no
+            working Wi-Fi. Empty leaves it open, which is easiest for setup
+            but lets anyone nearby reach the hub while it's up. Use at least
+            8 characters to require WPA2.
+
+    config FANWAVE_RF_MIN_RSSI
+        int "Weakest undecoded signal to keep (dBm)"
+        default -80
+        range -110 -30
+        help
+            In OOK mode the receiver turns background noise into a constant
+            stream of short bursts. Bursts that no decoder recognises are
+            dropped unless they arrived at least this strong. Raise it if
+            noise still shows up in the RF Lab; lower it if a weak remote is
+            missed.
+
+    config FANWAVE_RF_IDLE_US
+        int "Silence that ends a capture (µs)"
+        default 20000
+        range 2000 32767
+        help
+            Must be longer than the longest sync gap of the remotes you use.
+
+endmenu

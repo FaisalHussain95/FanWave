@@ -9,6 +9,8 @@
   let password = $state('');
   let connecting = $state(false);
   let error = $state<string | null>(null);
+  /** Set when the hub joined the network but this phone is still on the hub's own access point. */
+  let joined = $state<{ ssid: string; address: string } | null>(null);
 
   const chosen = $derived(networks?.find((n) => n.ssid === selected));
 
@@ -27,9 +29,13 @@
     connecting = true;
     error = null;
     try {
-      await api.connectWifi(selected, password);
-      await app.refreshHub();
+      const { address } = await api.connectWifi(selected, password);
       app.finishSetup();
+      if (address && location.hostname === '192.168.4.1') {
+        joined = { ssid: selected, address };
+        return;
+      }
+      await app.refreshHub();
       go(href.dashboard);
     } catch (err) {
       error = err instanceof Error ? err.message : String(err);
@@ -45,6 +51,25 @@
 </script>
 
 <div class="screen onboarding">
+  {#if joined}
+    <div class="screen-body">
+      <div class="intro">
+        <div class="badge"><Icon name="check-circle" size="24px" /></div>
+        <div class="eyebrow">Step 3 of 3</div>
+        <h1 class="title">The hub is on {joined.ssid}</h1>
+        <p class="lede">
+          Switch this phone back to <span class="hl">{joined.ssid}</span>, then open the hub at its new address.
+          Its setup network closes in two minutes.
+        </p>
+      </div>
+      <div class="panel address">
+        <span class="eyebrow">Hub address</span>
+        <span class="mono addr">http://{joined.address}</span>
+      </div>
+      <div class="spacer"></div>
+      <a class="btn btn-primary btn-block" style="height:48px" href={`http://${joined.address}/`}>Open FanWave</a>
+    </div>
+  {:else}
   <form class="screen-body" onsubmit={connect}>
     <div class="intro">
       <div class="badge"><Icon name="fan" size="24px" /></div>
@@ -91,6 +116,7 @@
       </button>
     </div>
   </form>
+  {/if}
 </div>
 
 <style>
@@ -117,4 +143,6 @@
   .field label { color: var(--color-neutral-400); }
   .buttons { display: flex; flex-direction: column; gap: 10px; }
   .error { margin: 0; font-size: 13px; color: var(--color-accent-300); }
+  .address { padding: 14px; gap: 4px; }
+  .addr { font-size: 18px; word-break: break-all; }
 </style>

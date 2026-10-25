@@ -1,9 +1,17 @@
 import type { HubApi } from './api';
+import { HttpHub } from './http';
 import { MockHub } from './mock';
 import { read, write } from './storage';
-import type { Fan, FanState, HubInfo, ProtocolMatch, Room } from './types';
+import type { Fan, FanState, HubInfo, LedSettings, ProtocolMatch, Room } from './types';
 
-export const api: HubApi = new MockHub();
+// The hub serves the production build, so talk to it. `npm run dev` uses the
+// in-browser mock unless VITE_HUB_URL points the dev proxy at a real hub;
+// ?mock forces the mock anywhere (handy for demos).
+const useMock =
+  new URLSearchParams(location.search).has('mock') || (import.meta.env.DEV && !import.meta.env.VITE_HUB_URL);
+
+export const api: HubApi = useMock ? new MockHub() : new HttpHub();
+export const isMock = useMock;
 
 const LAST_FAN = 'fanwave.lastFan';
 const SETUP_DONE = 'fanwave.setupDone';
@@ -32,6 +40,17 @@ class AppState {
 
   constructor() {
     setInterval(() => (this.now = Date.now()), 15_000);
+    // A remote used in the room, or another phone, changed a fan.
+    api.onFan((fan) => {
+      const i = this.fans.findIndex((f) => f.id === fan.id);
+      if (i >= 0) this.fans[i] = fan;
+      else this.fans.push(fan);
+    });
+  }
+
+  /** Show onboarding: first run of this browser, or the hub is in setup mode and we're on its access point. */
+  get needsSetup(): boolean {
+    return !this.setupDone || (!!this.hub?.setupMode && location.hostname === '192.168.4.1');
   }
 
   async load() {
@@ -107,6 +126,20 @@ class AppState {
   pickSpeed(fan: Fan, speed: number) {
     if (fan.commanded.power && fan.commanded.speed === speed) return this.command(fan.id, { power: false });
     return this.command(fan.id, { power: true, speed });
+  }
+
+  /** Change LED settings straight away, undoing it if the hub refuses. */
+  async setLed(patch: Partial<LedSettings>) {
+    const hub = this.hub;
+    if (!hub) return;
+    const before = hub.led;
+    hub.led = { ...hub.led, ...patch };
+    try {
+      hub.led = await api.setLed(patch);
+    } catch (e) {
+      hub.led = before;
+      this.notify(`Couldn't change the LED: ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   startPairing(draft: Partial<PairDraft> = {}) {

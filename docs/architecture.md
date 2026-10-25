@@ -23,17 +23,69 @@ a WebSocket (live captures, status events).
 - Configuration storage (NVS or a flash filesystem) for fans, rooms, learned
   codes, and settings, with backup/restore as JSON
 - OTA updates
+- Status LED driver (see below)
+
+### Status LED
+
+The ESP32-S3-DevKitC-1 has one addressable RGB LED (WS2812-type). It is the
+hub's only way to show what it's doing without opening the app.
+
+**Wiring.** The LED's data pin is GPIO48 on v1.0 boards and GPIO38 on v1.1;
+make it a build-time setting and check the board revision. It needs a timed
+data signal, not a plain on/off pin: the firmware drives it with a small
+WS2812 encoder on the RMT peripheral (`firmware/components/status_led`). On the N16R8 module the octal PSRAM takes
+GPIO35–37, so the CC1101's SPI and data pins must stay off those and off the
+LED pin.
+
+**Patterns.** One state is shown at a time. A higher row overrides lower ones;
+radio flashes play briefly on top of the base state and then return to it.
+
+| Priority | Hub state | LED |
+|---|---|---|
+| 1 | Error: radio not found, update failed, storage full | Red, steady |
+| 2 | Firmware update in progress | Purple, blinking; green flash when done |
+| 3 | Learning a remote button | Breathing; green flash when the code is caught |
+| 4 | Sending a command to a fan | Short flash, accent colour |
+| 4 | Radio received a signal | Short flash, white |
+| 5 | Wi‑Fi setup mode (own access point) | Slow blue pulse |
+| 5 | Connecting to Wi‑Fi | Fast blue blink |
+| 5 | Online and idle | Dim steady accent, or off (setting) |
+
+The send and receive flashes are the in-room version of the app's
+commanded-vs-confirmed distinction: a send flash means FanWave transmitted,
+a receive flash means it heard a remote.
+
+**Settings.** Stored with the hub's other settings and exposed in the web
+app's Settings screen:
+
+```jsonc
+{
+  "led": {
+    "enabled": true,        // false turns the LED off except for errors
+    "brightness": 40,       // 0–100
+    "idle": "dim",          // "dim" | "off": what to show when online and idle
+    "radioFlashes": true    // flash on send and receive
+  }
+}
+```
+
+The Settings screen should also offer **Identify**: the LED blinks for a few
+seconds so you can tell which board you're talking to.
 
 ## 3. RF engine
 
-Drives the CC1101 over SPI.
+Drives the CC1101 over SPI. Wiring is in [`firmware/README.md`](../firmware/README.md).
 
 - **RX:** asynchronous (raw) mode for capturing pulse timings; packet mode where
   a protocol is known
 - **TX:** replays learned raw timings or encoded frames
-- Configurable modulation (OOK / 2-FSK), frequency, data rate, and bandwidth
+- Configurable modulation (OOK / 2-FSK), frequency, data rate, and bandwidth.
+  Many US fan remotes use 302–305 MHz rather than 433.92; see
+  [protocols.md](protocols.md).
 
 ## 4. Protocol engine
+
+Which protocols, and why: [protocols.md](protocols.md).
 
 - **Decode:** turn pulse timings into bitstreams
 - **Match:** compare against known fan-remote protocols and report frame

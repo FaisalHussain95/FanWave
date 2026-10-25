@@ -9,14 +9,29 @@ import type {
   FanState,
   HubInfo,
   LearnSlot,
+  LedSettings,
   Modulation,
   ProtocolMatch,
+  ReceiverState,
   Room,
   WifiNetwork,
 } from './types';
 import { bitsToHex, splitFrame } from './rf';
 
 const STORE_KEY = 'fanwave.mock.v1';
+const LED_KEY = 'fanwave.mock.led.v1';
+
+const defaultLed: LedSettings = { enabled: true, brightness: 40, idle: 'dim', radioFlashes: true };
+
+function loadLed(): LedSettings {
+  try {
+    const raw = localStorage.getItem(LED_KEY);
+    if (raw) return { ...defaultLed, ...JSON.parse(raw) };
+  } catch {
+    /* storage unavailable or corrupt: use the defaults */
+  }
+  return { ...defaultLed };
+}
 
 const off: FanState = { power: false, speed: 1, light: false, reverse: false, timer: false };
 
@@ -133,12 +148,14 @@ export class MockHub implements HubApi {
   private nextCaptureId = 15;
   private listening = true;
   private modulation: Modulation = 'OOK';
+  private frequencyMHz = 433.92;
   private captureSubs = new Set<(c: Capture) => void>();
   private captureTimer: ReturnType<typeof setInterval> | null = null;
   private info: HubInfo = {
     name: 'FanWave‑3F2A', hardware: 'ESP32‑S3 · CC1101', host: 'fanwave.local', online: true,
     uptimeSeconds: 6 * 86400 + 4 * 3600, wifiRssi: -58, heapFreeBytes: 212 * 1024,
     wifiNetwork: 'Maison‑5G', accessPointFallback: true, localOnly: true, radioOk: true,
+    led: loadLed(),
     firmware: '0.8.3', update: { version: '0.9.0', sizeBytes: 1.4 * 1024 * 1024 },
   };
 
@@ -226,6 +243,7 @@ export class MockHub implements HubApi {
     await wait(1200);
     if (password.length > 0 && password.length < 8) throw new Error('That password is too short for WPA2.');
     this.info.wifiNetwork = ssid;
+    return { address: null };
   }
 
   async captures() {
@@ -233,11 +251,22 @@ export class MockHub implements HubApi {
     return structuredClone(this.captureList);
   }
 
-  async setReceiver(opts: { listening: boolean; modulation: Modulation }) {
+  onFan() {
+    return () => {};
+  }
+
+  async receiver(): Promise<ReceiverState> {
+    await wait(40);
+    return { listening: this.listening, modulation: this.modulation, frequencyMHz: this.frequencyMHz };
+  }
+
+  async setReceiver(opts: Partial<ReceiverState>) {
     await wait(60);
-    this.listening = opts.listening;
-    this.modulation = opts.modulation;
+    this.listening = opts.listening ?? this.listening;
+    this.modulation = opts.modulation ?? this.modulation;
+    this.frequencyMHz = opts.frequencyMHz ?? this.frequencyMHz;
     this.syncCaptureTimer();
+    return { listening: this.listening, modulation: this.modulation, frequencyMHz: this.frequencyMHz };
   }
 
   onCapture(cb: (c: Capture) => void) {
@@ -296,16 +325,44 @@ export class MockHub implements HubApi {
   }
 
   learnButton(slot: LearnSlot, signal: AbortSignal) {
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<{ code: string; captureId: number | null }>((resolve, reject) => {
       const t = setTimeout(() => {
         const cmd = slotCommands[slot.label] ?? '1111';
-        resolve(`0x3A5C1 · ${cmd}`);
+        resolve({ code: `0x3A5C1 · ${cmd}`, captureId: null });
       }, 1400);
       signal.addEventListener('abort', () => {
         clearTimeout(t);
         reject(new DOMException('Stopped listening', 'AbortError'));
       });
     });
+  }
+
+  async setLed(patch: Partial<LedSettings>) {
+    await wait(80);
+    const next = { ...this.info.led, ...patch };
+    next.brightness = Math.min(100, Math.max(0, Math.round(next.brightness)));
+    this.info.led = next;
+    try {
+      localStorage.setItem(LED_KEY, JSON.stringify(next));
+    } catch {
+      /* storage unavailable: keep in memory only */
+    }
+    return { ...next };
+  }
+
+  async identify() {
+    await wait(80);
+  }
+
+  async uploadFirmware(file: File, onProgress: (f: number) => void) {
+    if (!file.name.endsWith('.bin')) throw new Error('Choose a firmware .bin file.');
+    for (let i = 1; i <= 10; i++) {
+      await wait(120);
+      onProgress(i / 10);
+    }
+    this.info.firmware = '0.9.0';
+    this.info.update = null;
+    return this.info.firmware;
   }
 
   async installUpdate(onProgress: (f: number) => void) {

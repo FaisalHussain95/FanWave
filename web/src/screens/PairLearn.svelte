@@ -44,7 +44,9 @@
     slot.status = 'listening';
     const ctl = (controller = new AbortController());
     try {
-      slot.code = await api.learnButton($state.snapshot(slot), ctl.signal);
+      const learned = await api.learnButton($state.snapshot(slot), ctl.signal);
+      slot.code = learned.code;
+      slot.captureId = learned.captureId;
       slot.status = 'done';
       controller = null;
       const next = slots.find((s) => s.status === 'todo');

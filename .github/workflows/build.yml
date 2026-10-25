@@ -1,0 +1,118 @@
+name: Build
+
+# Every push and PR: check and build the web app, run the host tests, and
+# build the firmware with the web app inside it.
+# Tags like v1.2.3: also publish a GitHub release with flashable binaries.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+          retention-days: 7
+
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Protocol and LED pattern tests
+        working-directory: firmware
+        run: |
+          cmake -S test/host -B build-host
+          cmake --build build-host
+          ctest --test-dir build-host --output-on-failure
+
+  firmware:
+    needs: web
+    runs-on: ubuntu-latest
+    container: espressif/idf:v5.4.2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: web/dist
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v="${GITHUB_REF_NAME#v}"
+          else
+            v="0.0.0-${GITHUB_SHA::7}"
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Build
+        shell: bash
+        env:
+          FANWAVE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware
+          idf.py set-target esp32s3
+          idf.py build
+          # One image for browser flashers, written at offset 0x0.
+          idf.py merge-bin -o fanwave-full.bin
+      - name: Collect binaries
+        shell: bash
+        run: |
+          v="${{ steps.version.outputs.version }}"
+          mkdir -p out
+          cp firmware/build/fanwave-full.bin "out/fanwave-$v-esp32s3-full.bin"
+          cp firmware/build/fanwave.bin "out/fanwave-$v-esp32s3-ota.bin"
+          (cd out && sha256sum *.bin > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fanwave-${{ steps.version.outputs.version }}
+          path: out/*
+          retention-days: 30
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [firmware, host-tests]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: fanwave-*
+          path: out
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          generate_release_notes: true
+          body: |
+            **First install or USB flash:** `fanwave-…-esp32s3-full.bin`, written at offset **0x0**.
+            Easiest from a browser: open https://espressif.github.io/esptool-js/, connect the
+            board's UART USB port, add the file at address `0x0`, and click Program.
+            Your Wi-Fi settings, fans and learned codes are kept.
+
+            **Update over Wi-Fi:** `fanwave-…-esp32s3-ota.bin`, from the app's
+            Settings → Firmware → Choose file. (This doesn't update the web app.)

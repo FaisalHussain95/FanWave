@@ -23,6 +23,7 @@ export interface Fan {
   /** Human label for the protocol line, e.g. "PT2262 · 0x3A5C1" or "Raw · 6 codes". */
   protocolLabel: string;
   frequencyMHz: number;
+  modulation?: Modulation;
   speeds: number;
   capabilities: Capability[];
   /** What FanWave last sent. */
@@ -47,11 +48,26 @@ export interface HubInfo {
   wifiRssi: number;
   heapFreeBytes: number;
   wifiNetwork: string | null;
+  /** The hub is running its own setup access point. */
+  setupMode?: boolean;
   accessPointFallback: boolean;
   localOnly: boolean;
   radioOk: boolean;
+  led: LedSettings;
   firmware: string;
   update: { version: string; sizeBytes: number } | null;
+}
+
+/** The board's status LED. See "Status LED" in docs/architecture.md. */
+export interface LedSettings {
+  /** False turns the LED off except for errors. */
+  enabled: boolean;
+  /** 0–100. */
+  brightness: number;
+  /** What to show when online and idle. */
+  idle: 'dim' | 'off';
+  /** Flash on send and receive. */
+  radioFlashes: boolean;
 }
 
 export interface WifiNetwork {
@@ -65,6 +81,7 @@ export interface Capture {
   at: number;
   modulation: Modulation;
   rssi: number;
+  frequencyMHz?: number;
   repeats: number;
   /** Decoded bits, when the pulse train decodes to a fixed-width frame. */
   bits: string | null;
@@ -94,6 +111,16 @@ export interface ProtocolMatch {
   confidence: number;
   note: string;
   frame: FrameField[];
+  /** Decoded fields, when the protocol has an address part. */
+  address?: string;
+  command?: string;
+  bits?: string;
+}
+
+export interface ReceiverState {
+  listening: boolean;
+  modulation: Modulation;
+  frequencyMHz: number;
 }
 
 export interface LearnSlot {
@@ -102,6 +129,8 @@ export interface LearnSlot {
   capability: Capability;
   /** Code as shown to the user, e.g. "0x3A5C1 · 0110". */
   code: string | null;
+  /** The capture the hub stores this button from. */
+  captureId?: number | null;
   status: 'todo' | 'listening' | 'done' | 'skipped';
 }
 
