@@ -6,7 +6,7 @@
   import { go, href } from '../lib/router.svelte';
   import type { Capability, LearnSlot } from '../lib/types';
 
-  const defs: [string, Capability, IconName][] = [
+  const defs: [string, Capability | 'pair', IconName][] = [
     ['Power', 'power', 'power'],
     ['Speed 1', 'speed', 'number-one'],
     ['Speed 2', 'speed', 'number-two'],
@@ -17,6 +17,8 @@
     ['Light', 'light', 'lightbulb'],
     ['Reverse', 'reverse', 'arrows-counter-clockwise'],
     ['Timer', 'timer', 'timer'],
+    // The remote's pairing button, if it has one: sent by "Pair with fan" for this fan and its copies.
+    ['Pair', 'pair', 'broadcast'],
   ];
   const iconFor = Object.fromEntries(defs.map(([label, , icon]) => [label, icon])) as Record<string, IconName>;
 
@@ -127,7 +129,10 @@
       <div class="intro">
         <span class="eyebrow">Step 3 of 4 · {learned} of {slots.length} learned</span>
         <h1 class="title">Teach each button</h1>
-        <p class="lede">Tap a row, then press that button on the remote. Skip what your fan doesn't have.</p>
+        <p class="lede">
+          Tap a row, then press that button on the remote. Skip what your fan doesn't have. If the remote has a pairing
+          button, teach it as Pair.
+        </p>
       </div>
 
       <ul class="slots">

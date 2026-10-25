@@ -144,8 +144,28 @@ static void test_short_input(void)
     CHECK(t.pulse_count == 0);
 }
 
+static void test_frame_address(void)
+{
+    const fw_protocol_t *pt = fw_protocol_find("pt2262");
+    uint64_t addr, out;
+    // The board's remote: address 0x218C0, button code in the low 4 bits.
+    CHECK(fw_frame_address(pt, 0x218C03, 24, &addr) && addr == 0x218C0);
+    // A copy with another address keeps the button code.
+    CHECK(fw_frame_with_address(pt, 0x218C03, 24, 0x5A5A5, &out) && out == 0x5A5A53);
+    CHECK(fw_frame_address(pt, out, 24, &addr) && addr == 0x5A5A5);
+    // The address must fit in 20 bits, and a frame must be longer than its address.
+    CHECK(!fw_frame_with_address(pt, 0x218C03, 24, 0x100000, &out));
+    CHECK(!fw_frame_address(pt, 0x218C0, 20, &addr));
+    // Protocols without a known address field can't be re-addressed.
+    CHECK(!fw_frame_address(fw_protocol_find("rcs2"), 0x123456, 24, &addr));
+    // DL fan remotes: a 6-bit DIP address ahead of the command.
+    const fw_protocol_t *dl = fw_protocol_find("dl-fanimation");
+    CHECK(fw_frame_with_address(dl, 0x5F3, 12, 0x2A, &out) && out == ((0x2AULL << 6) | 0x33));
+}
+
 int main(void)
 {
+    test_frame_address();
     test_pt2262_round_trip();
     test_capture_starting_mid_frame();
     test_inverted_ht12e();

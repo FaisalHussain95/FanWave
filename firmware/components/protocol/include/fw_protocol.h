@@ -95,6 +95,21 @@ bool fw_decode_with(const fw_protocol_t *p, const uint32_t *durations, size_t co
 size_t fw_encode(const fw_protocol_t *p, uint64_t bits, uint8_t bit_count, uint16_t repeats,
                  uint16_t base_us, uint32_t *out, size_t max_out);
 
+/**
+ * The address part of a frame: its leading address_bits bits, which identify
+ * the remote. False when the protocol has no known address field, or the frame
+ * is no longer than it.
+ */
+bool fw_frame_address(const fw_protocol_t *p, uint64_t bits, uint8_t bit_count, uint64_t *address);
+
+/**
+ * The same frame from another remote: its address replaced, the command bits
+ * after it kept. False under the same conditions as fw_frame_address(), or if
+ * the address doesn't fit in address_bits.
+ */
+bool fw_frame_with_address(const fw_protocol_t *p, uint64_t bits, uint8_t bit_count, uint64_t address,
+                           uint64_t *out);
+
 /** Summarise short/long pulse widths and the sync gap. */
 fw_timing_t fw_analyze(const uint32_t *durations, size_t count);
 

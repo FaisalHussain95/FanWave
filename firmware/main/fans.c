@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "esp_log.h"
+#include "esp_random.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -20,6 +21,8 @@ static const char *TAG = "fans";
 #define MAX_NAME 40
 #define DECODED_REPEATS 8
 #define MIN_CONFIDENCE 0.5f
+#define PAIR_SENDS 3     // a pairing press is sent this many times
+#define PAIR_GAP_MS 300
 
 static SemaphoreHandle_t s_lock;
 static cJSON *s_rooms;
@@ -100,6 +103,50 @@ static void save_fans(void)
     if (storage_write_json(FANS_PATH, s_fans) != ESP_OK) ESP_LOGE(TAG, "couldn't save fans");
 }
 
+/**
+ * The remote behind a fan's decoded buttons: its protocol and address, when
+ * every button decodes and they all come from the same remote. That is what
+ * lets a copy send the same buttons under another address.
+ */
+static bool fan_remote(const cJSON *fan, const fw_protocol_t **proto, uint64_t *address)
+{
+    const cJSON *commands = cJSON_GetObjectItemCaseSensitive(fan, "commands"), *cmd;
+    bool have = false;
+    cJSON_ArrayForEach(cmd, commands) {
+        const char *id = jstr(cmd, "protocol"), *b = jstr(cmd, "bits");
+        const fw_protocol_t *p = id ? fw_protocol_find(id) : NULL;
+        uint64_t a;
+        if (!p || !b || !fw_frame_address(p, strtoull(b, NULL, 2), (uint8_t)strlen(b), &a)) return false;
+        if (have && (p != *proto || a != *address)) return false;
+        *proto = p;
+        *address = a;
+        have = true;
+    }
+    return have;
+}
+
+static void format_address(const fw_protocol_t *p, uint64_t address, char *out, size_t size)
+{
+    snprintf(out, size, "0x%0*llX", (p->address_bits + 3) / 4, (unsigned long long)address);
+}
+
+/**
+ * Fields derived from the learned buttons, for the app: "address" (null for
+ * raw or mixed buttons), "copyable" (a copy with a new address can be made)
+ * and "pairCode" (a pair button was learned).
+ */
+static void annotate(cJSON *fan)
+{
+    const fw_protocol_t *p;
+    uint64_t address;
+    bool known = fan_remote(fan, &p, &address);
+    char text[24];
+    if (known) format_address(p, address, text, sizeof(text));
+    jset(fan, "address", known ? cJSON_CreateString(text) : cJSON_CreateNull());
+    jset(fan, "copyable", cJSON_CreateBool(known));
+    jset(fan, "pairCode", cJSON_CreateBool(cJSON_HasObjectItem(cJSON_GetObjectItemCaseSensitive(fan, "commands"), "pair")));
+}
+
 // --- rooms ----------------------------------------------------------------
 
 esp_err_t fans_init(void)
@@ -119,7 +166,10 @@ esp_err_t fans_init(void)
     }
     // What the hub heard from remotes before a reboot is no longer known.
     cJSON *fan;
-    cJSON_ArrayForEach(fan, s_fans) jset(fan, "confirmed", cJSON_CreateNull());
+    cJSON_ArrayForEach(fan, s_fans) {
+        jset(fan, "confirmed", cJSON_CreateNull());
+        annotate(fan); // fans saved by older firmware lack the derived fields
+    }
     ESP_LOGI(TAG, "%d rooms, %d fans", cJSON_GetArraySize(s_rooms), cJSON_GetArraySize(s_fans));
     return ESP_OK;
 }
@@ -276,6 +326,7 @@ cJSON *fans_add(const cJSON *body, const cc1101_config_t *radio, char *err)
     cJSON_AddNullToObject(fan, "confirmed");
     cJSON_AddNullToObject(fan, "lastSentAt");
     cJSON_AddItemToObject(fan, "commands", commands);
+    annotate(fan);
 
     cJSON_AddItemToArray(s_fans, fan);
     save_fans();
@@ -405,6 +456,161 @@ done:
     return result;
 }
 
+// --- virtual remotes ------------------------------------------------------------
+
+static bool address_taken(const fw_protocol_t *p, uint64_t address)
+{
+    cJSON *fan;
+    cJSON_ArrayForEach(fan, s_fans) {
+        const fw_protocol_t *fp;
+        uint64_t a;
+        if (fan_remote(fan, &fp, &a) && fp == p && a == address) return true;
+    }
+    return false;
+}
+
+/** A random address no stored fan of this protocol uses, avoiding all zeros and all ones. */
+static bool fresh_address(const fw_protocol_t *p, uint64_t *out)
+{
+    uint64_t top = p->address_bits >= 64 ? UINT64_MAX : (1ULL << p->address_bits) - 1;
+    for (int tries = 0; tries < 64; tries++) {
+        uint64_t a = (((uint64_t)esp_random() << 32) | esp_random()) & top;
+        if (a == 0 || a == top || address_taken(p, a)) continue;
+        *out = a;
+        return true;
+    }
+    return false;
+}
+
+cJSON *fans_duplicate(const char *id, const cJSON *body, char *err)
+{
+    const char *name = jstr(body, "name"), *room_id = jstr(body, "roomId"), *wanted = jstr(body, "address");
+    if (!valid_name(name)) {
+        strcpy(err, "Fan names are 1-40 characters.");
+        return NULL;
+    }
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    cJSON *result = NULL;
+    cJSON *src = find_by_id(s_fans, id);
+    const fw_protocol_t *p;
+    uint64_t old, address;
+    if (!src) {
+        strcpy(err, "Unknown fan.");
+        goto done;
+    }
+    if (!room_id || !find_by_id(s_rooms, room_id)) {
+        strcpy(err, "Unknown room.");
+        goto done;
+    }
+    if (!fan_remote(src, &p, &old)) {
+        strcpy(err, "Only remotes whose buttons all decode, from one remote, can be copied.");
+        goto done;
+    }
+    if (wanted && *wanted) {
+        char *end;
+        address = strtoull(wanted, &end, 16);
+        uint64_t top = p->address_bits >= 64 ? UINT64_MAX : (1ULL << p->address_bits) - 1;
+        if (*end || address > top) {
+            snprintf(err, 96, "The address must be hex, at most %d bits (0x0 to 0x%llX).", p->address_bits,
+                     (unsigned long long)top);
+            goto done;
+        }
+        if (address_taken(p, address)) {
+            strcpy(err, "Another fan already uses that address.");
+            goto done;
+        }
+    } else if (!fresh_address(p, &address)) {
+        strcpy(err, "Couldn't find an unused address.");
+        goto done;
+    }
+
+    cJSON *fan = cJSON_Duplicate(src, true);
+    char new_id[48], text[24], label[80];
+    make_id(s_fans, name, new_id, sizeof(new_id));
+    jset(fan, "id", cJSON_CreateString(new_id));
+    jset(fan, "name", cJSON_CreateString(name));
+    jset(fan, "roomId", cJSON_CreateString(room_id));
+    jset(fan, "copyOf", cJSON_CreateString(jstr(src, "name") ? jstr(src, "name") : ""));
+    format_address(p, address, text, sizeof(text));
+    snprintf(label, sizeof(label), "%s · %s", p->name, text);
+    jset(fan, "protocolLabel", cJSON_CreateString(label));
+    jset(fan, "commanded", default_state());
+    jset(fan, "confirmed", cJSON_CreateNull());
+    jset(fan, "lastSentAt", cJSON_CreateNull());
+    cJSON *cmd;
+    cJSON_ArrayForEach(cmd, cJSON_GetObjectItemCaseSensitive(fan, "commands")) {
+        const char *b = jstr(cmd, "bits");
+        uint8_t count = (uint8_t)strlen(b);
+        uint64_t moved;
+        fw_frame_with_address(p, strtoull(b, NULL, 2), count, address, &moved); // fan_remote() checked it fits
+        char bits[65];
+        bits_to_string(moved, count, bits);
+        jset(cmd, "bits", cJSON_CreateString(bits));
+    }
+    annotate(fan);
+    cJSON_AddItemToArray(s_fans, fan);
+    save_fans();
+    result = cJSON_Duplicate(fan, true);
+    ESP_LOGI(TAG, "copied %s as %s, address %s", id, new_id, text);
+done:
+    xSemaphoreGive(s_lock);
+    return result;
+}
+
+const char *fans_pair(const char *id, char *err)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    const char *sent = NULL;
+    cJSON *fan = find_by_id(s_fans, id);
+    if (!fan) {
+        strcpy(err, "Unknown fan.");
+        goto done;
+    }
+    // Most learning receivers take any button while they're in pairing mode,
+    // so without a learned pair button, power is the next best thing.
+    const char *key = has_command(fan, "pair") ? "pair" : "power";
+    for (int i = 0; i < PAIR_SENDS; i++) {
+        if (i) vTaskDelay(pdMS_TO_TICKS(PAIR_GAP_MS));
+        if (send_button(fan, key, err) != ESP_OK) goto done;
+    }
+    sent = key;
+done:
+    xSemaphoreGive(s_lock);
+    return sent;
+}
+
+esp_err_t fans_remove(const char *id, char *err)
+{
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    esp_err_t e = ESP_ERR_NOT_FOUND;
+    int index = 0;
+    cJSON *fan;
+    cJSON_ArrayForEach(fan, s_fans) {
+        const char *fid = jstr(fan, "id");
+        if (fid && strcmp(fid, id) == 0) break;
+        index++;
+    }
+    if (!fan) {
+        strcpy(err, "Unknown fan.");
+        goto done;
+    }
+    cJSON *cmd;
+    cJSON_ArrayForEach(cmd, cJSON_GetObjectItemCaseSensitive(fan, "commands")) {
+        const char *raw = jstr(cmd, "raw");
+        if (!raw) continue;
+        char path[96];
+        raw_path(raw, path, sizeof(path));
+        remove(path);
+    }
+    cJSON_DeleteItemFromArray(s_fans, index);
+    save_fans();
+    ESP_LOGI(TAG, "removed fan %s", id);
+    e = ESP_OK;
+done:
+    xSemaphoreGive(s_lock);
+    return e;
+}
+
 // --- remotes heard over the air -------------------------------------------
 
 cJSON *fans_observe(const capture_t *c)
@@ -520,6 +726,7 @@ esp_err_t fans_restore(const cJSON *backup, char *err)
     }
     cJSON_ArrayForEach(fan, new_fans) {
         jset(fan, "confirmed", cJSON_CreateNull());
+        annotate(fan);
         cJSON_ArrayForEach(cmd, cJSON_GetObjectItemCaseSensitive(fan, "commands")) {
             cJSON *arr = cJSON_GetObjectItemCaseSensitive(cmd, "durations");
             if (!cJSON_IsArray(arr)) continue;

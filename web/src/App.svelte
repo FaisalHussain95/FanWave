@@ -3,6 +3,7 @@
   import { router } from './lib/router.svelte';
   import Dashboard from './screens/Dashboard.svelte';
   import FanControl from './screens/FanControl.svelte';
+  import FanRemote from './screens/FanRemote.svelte';
   import Onboarding from './screens/Onboarding.svelte';
   import PairListen from './screens/PairListen.svelte';
   import PairLearn from './screens/PairLearn.svelte';
@@ -32,6 +33,8 @@
   <Dashboard />
 {:else if route.name === 'fan'}
   {#key route.id}<FanControl id={route.id} />{/key}
+{:else if route.name === 'remote'}
+  {#key route.id}<FanRemote id={route.id} />{/key}
 {:else if route.name === 'rooms'}
   <Rooms />
 {:else if route.name === 'settings'}
