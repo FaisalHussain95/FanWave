@@ -31,6 +31,33 @@ network for one band. Most sold as "433 MHz" work poorly at the 303–315 MHz
 many US ceiling-fan remotes use (Hampton Bay, Harbor Breeze, Minka). Use a
 315 MHz module for those; see [`docs/protocols.md`](../docs/protocols.md).
 
+## Flash a release from the browser
+
+Every `v*` tag builds a GitHub release with two files:
+
+| File | Use |
+|---|---|
+| `fanwave-<version>-esp32s3-full.bin` | First install, or any USB flash: bootloader, partition table, firmware and web app in one image, written at **0x0** |
+| `fanwave-<version>-esp32s3-ota.bin` | Updates over Wi‑Fi: Settings → Firmware → Choose file (firmware only, not the web app) |
+
+To flash the full image without installing anything:
+
+1. Plug the board's **UART** USB port into a computer and open
+   https://espressif.github.io/esptool-js/ in Chrome or Edge (Web Serial).
+2. Click **Connect** and pick the board's serial port. If it won't connect,
+   hold **BOOT**, tap **RST**, then release BOOT.
+3. Add `fanwave-…-full.bin` at flash address `0x0` and click **Program**.
+4. Tap **RST**. The hub starts its setup network (see First start below).
+
+The image doesn't cover the NVS or `storage` partitions, so a reflash keeps
+the saved Wi‑Fi network, fans and learned codes. Use **Erase Flash** first
+for a clean start.
+
+To cut a release: `git tag v0.3.0 && git push origin v0.3.0`. CI
+(`.github/workflows/build.yml`) also builds both files for every push to
+`main` and every pull request; they're attached to the workflow run as an
+artifact.
+
 ## Build and flash
 
 Needs ESP-IDF 5.4 and Node 20+. Build the web app first: the firmware build
