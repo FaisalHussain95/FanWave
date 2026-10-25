@@ -1,0 +1,5 @@
+# Fetched by the IDF component manager into managed_components/ on the first build.
+dependencies:
+  idf: ">=5.4"
+  # Answers fanwave.local and advertises the HTTP API (see wifi.c).
+  espressif/mdns: "^1.8"

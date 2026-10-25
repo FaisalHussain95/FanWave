@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "esp_app_desc.h"
 #include "esp_check.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -14,6 +15,7 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
+#include "mdns.h"
 #include "sdkconfig.h"
 #include "status_led.h"
 
@@ -66,6 +68,27 @@ static void stop_ap(void)
     s_ap_active = false;
     ESP_LOGI(TAG, "setup access point closed");
     show_status();
+}
+
+// Answer fanwave.local on both the home network and the setup AP, and advertise the
+// API as _http._tcp. The responder follows the default STA/AP netifs by itself, so
+// nothing needs redoing on reconnect. With two hubs on one network, the second one's
+// probe loses and it renames itself (fanwave-2.local); the "id" TXT record tells them apart.
+static void start_mdns(void)
+{
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "mDNS unavailable: %s", esp_err_to_name(err));
+        return;
+    }
+    mdns_hostname_set("fanwave");
+    mdns_instance_name_set(s_hostname);
+    mdns_txt_item_t txt[] = {
+        {"id", s_hostname},
+        {"firmware", esp_app_get_description()->version},
+    };
+    mdns_service_add(NULL, "_http", "_tcp", 80, txt, sizeof(txt) / sizeof(txt[0]));
+    ESP_LOGI(TAG, "mDNS: http://fanwave.local");
 }
 
 static void on_fallback(TimerHandle_t t)
@@ -133,6 +156,7 @@ esp_err_t wifi_start(void)
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
     snprintf(s_hostname, sizeof(s_hostname), "FanWave-%02X%02X", mac[4], mac[5]);
     esp_netif_set_hostname(s_sta, s_hostname);
+    start_mdns();
 
     wifi_init_config_t init = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init), TAG, "init");

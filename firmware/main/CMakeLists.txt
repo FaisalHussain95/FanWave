@@ -1,7 +1,7 @@
 idf_component_register(SRCS "main.c" "console.c" "api.c" "captures.c" "fans.c" "settings.c" "storage.c" "wifi.c"
                        INCLUDE_DIRS "."
                        REQUIRES cc1101 rf protocol status_led console nvs_flash esp_driver_uart
-                                esp_wifi esp_netif esp_event esp_http_server app_update spiffs json)
+                                esp_wifi esp_netif esp_event esp_http_server app_update spiffs json mdns)
 
 # Put the web app in the "www" partition when it has been built (cd web && npm run build).
 set(WEB_DIST "${CMAKE_CURRENT_SOURCE_DIR}/../../web/dist")
