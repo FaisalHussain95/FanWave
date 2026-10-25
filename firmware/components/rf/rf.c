@@ -310,7 +310,10 @@ esp_err_t radio_transmit(const uint32_t *durations, size_t count)
         esp_rom_delay_us(1000);
         rmt_transmit_config_t tc = {.loop_count = 0, .flags.eot_level = 0};
         err = rmt_transmit(s_tx, s_copy, sym, nsym * sizeof(rmt_symbol_word_t), &tc);
-        if (err == ESP_OK) err = rmt_tx_wait_all_done(s_tx, 5000);
+        // Allow for the train's own length: a held button can run for seconds.
+        uint64_t total_us = 0;
+        for (size_t i = 0; i < count; i++) total_us += durations[i];
+        if (err == ESP_OK) err = rmt_tx_wait_all_done(s_tx, (int)(total_us / 1000) + 2000);
     }
     esp_err_t after = was_listening ? cc1101_rx() : cc1101_idle();
     xSemaphoreGive(s_radio);

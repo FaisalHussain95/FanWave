@@ -163,8 +163,28 @@ static void test_frame_address(void)
     CHECK(fw_frame_with_address(dl, 0x5F3, 12, 0x2A, &out) && out == ((0x2AULL << 6) | 0x33));
 }
 
+static void test_repeat_train(void)
+{
+    uint32_t out[64];
+    // Ends on a space: repeated as is until it lasts the requested time.
+    const uint32_t even[] = {300, 900, 900, 300}; // 2.4 ms
+    size_t n = fw_repeat_train(even, 4, 10000, 10000, out, 64);
+    CHECK(n == 20); // 5 presses = 12 ms >= 10 ms
+    CHECK(out[16] == 300 && out[19] == 300);
+    // Ends on a mark: each press gets the gap after it, so marks and spaces keep alternating.
+    const uint32_t odd[] = {300, 900, 300};
+    n = fw_repeat_train(odd, 3, 8000, 20000, out, 64);
+    CHECK(n == 3 * 4); // each press is 9.5 ms with its gap: 3 of them reach 20 ms
+    CHECK(n % 4 == 0 && out[3] == 8000 && out[4] == 300);
+    // At least one press even for a zero duration; stops when the buffer is full.
+    CHECK(fw_repeat_train(even, 4, 0, 0, out, 64) == 4);
+    CHECK(fw_repeat_train(even, 4, 0, 1000000, out, 10) == 8);
+    CHECK(fw_repeat_train(even, 4, 0, 1000, out, 3) == 0);
+}
+
 int main(void)
 {
+    test_repeat_train();
     test_frame_address();
     test_pt2262_round_trip();
     test_capture_starting_mid_frame();

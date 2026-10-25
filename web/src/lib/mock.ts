@@ -263,11 +263,12 @@ export class MockHub implements HubApi {
     return structuredClone(annotate(fan));
   }
 
-  async pairFan(fanId: string) {
-    await wait(1200);
+  async pairFan(fanId: string, holdSeconds = 0) {
+    if (holdSeconds < 0 || holdSeconds > 10) throw new Error('holdSeconds must be between 0 and 10.');
+    await wait(holdSeconds ? holdSeconds * 1000 : 1200);
     const fan = this.state.fans.find((f) => f.id === fanId);
     if (!fan) throw new Error('Unknown fan.');
-    return { sent: fan.pairCode ? 'pair' : 'power' };
+    return { sent: fan.pairCode ? 'pair' : 'power', heldSeconds: holdSeconds };
   }
 
   async removeFan(fanId: string) {

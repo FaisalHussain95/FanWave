@@ -42,7 +42,7 @@ Errors are `{"error": "message"}` with a 4xx/5xx status.
 | `POST /api/fans` | `NewFan` (below) → `Fan` |
 | `POST /api/fans/{id}/command` | Part of `FanState`, e.g. `{"power": true, "speed": 3}`. Transmits the matching learned button and returns the updated `Fan` |
 | `POST /api/fans/{id}/duplicate` | `{name, roomId, address?}` → the new `Fan`: a virtual copy of this fan's remote under another address. `address` is hex (`"0x5A5A5"` or `"5A5A5"`); without it a random unused one is picked. `400` if the fan can't be copied or the address is taken |
-| `POST /api/fans/{id}/pair` | Sends the fan's `pair` button, or `power` if none was learned, three times over about two seconds, for a receiver that has just been powered on. `{"sent": "pair"}`. Doesn't change `commanded` |
+| `POST /api/fans/{id}/pair` | Sends the fan's `pair` button, or `power` if none was learned, for a receiver that has just been powered on: three presses over about two seconds, or with `{"holdSeconds": n}` (up to 10) the button held down, i.e. its frame repeated back to back in one transmission. The request returns when it's done. `{"sent": "pair", "heldSeconds": 0}`. Doesn't change `commanded` |
 | `DELETE /api/fans/{id}` | Forget the fan and its learned buttons. `204`, and a `fanRemoved` event |
 
 `NewFan` is the pairing result:
