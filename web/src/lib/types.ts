@@ -125,6 +125,8 @@ export interface ReceiverState {
   minRssiDbm: number;
   /** A frequency scan has the radio: frequency, modulation and listening can't change. */
   scanning?: boolean;
+  /** Level changes per second on the receive pin (GDO2). Noise alone keeps this well above 0 while listening. */
+  edgesPerSecond?: number;
 }
 
 /** Bursts the hub dropped as noise over the last periodMs. */

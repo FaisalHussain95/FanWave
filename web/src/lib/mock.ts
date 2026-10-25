@@ -291,6 +291,7 @@ export class MockHub implements HubApi {
     return {
       listening: this.listening, modulation: this.modulation, frequencyMHz: this.frequencyMHz,
       minRssiDbm: this.minRssiDbm, scanning: this.scanning,
+      edgesPerSecond: this.listening && !this.scanning ? 30000 + Math.round(Math.random() * 8000) : 0,
     };
   }
 

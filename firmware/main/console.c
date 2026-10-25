@@ -35,7 +35,12 @@ static int cmd_status(int argc, char **argv)
            version);
     printf("frequency: %.3f MHz %s\n", c.frequency_hz / 1e6, c.modulation == CC1101_MOD_OOK ? "OOK" : "2-FSK");
     printf("listening: %s\n", radio_listening() ? "yes" : "no");
-    if (radio_listening()) printf("rssi:      %d dBm\n", cc1101_rssi_dbm());
+    if (radio_listening()) {
+        printf("rssi:      %d dBm\n", cc1101_rssi_dbm());
+        uint32_t edges = radio_edge_rate();
+        printf("GDO2:      %lu edges/s%s\n", (unsigned long)edges,
+               edges ? "" : " (nothing reaching the receive pin: check GDO2 -> GPIO wiring)");
+    }
     printf("threshold: %d dBm (undecoded bursts weaker than this are dropped)\n", hub_min_rssi());
     if (hub_scanning()) printf("scanning:  yes\n");
     return 0;

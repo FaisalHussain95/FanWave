@@ -14,6 +14,7 @@
   let frequency = $state(433.92);
   let minRssi = $state(-80);
   let scanning = $state(false);
+  let edgesPerSecond = $state<number | null>(null);
   let ready = $state(false);
 
   // Common remote frequencies: US ceiling fans sit around 303–305 MHz.
@@ -56,6 +57,16 @@
     const t = setInterval(() => (clock = Date.now()), 1000);
     return () => clearInterval(t);
   });
+  // The receive pin's activity, refreshed while this screen is open.
+  $effect(() => {
+    const poll = () =>
+      api.receiver().then((r) => (edgesPerSecond = r.edgesPerSecond ?? null), () => {});
+    poll();
+    const t = setInterval(poll, 2000);
+    return () => clearInterval(t);
+  });
+  const pinDead = $derived(listening && !scanning && edgesPerSecond === 0);
+
   const recent = $derived(filtered.filter((r) => clock - r.at < FILTER_WINDOW_MS));
   const dropped = $derived(recent.reduce((n, r) => n + r.count, 0));
   const loudestDropped = $derived(recent.length ? Math.max(...recent.map((r) => r.strongestDbm)) : null);
@@ -115,6 +126,17 @@
           Undecoded bursts weaker than this are dropped as noise. Nothing dropped in the last 10 s.
         {/if}
       </p>
+      {#if edgesPerSecond !== null}
+        <p class="hint mono" class:warn={pinDead}>
+          Receive pin (GDO2): {edgesPerSecond.toLocaleString()} edges/s
+        </p>
+      {/if}
+      {#if pinDead}
+        <p class="hint warn">
+          Nothing is reaching the receive pin. A listening radio always produces some noise here, so check the wire
+          from the CC1101's GDO2 to the ESP32 (GPIO5 by default).
+        </p>
+      {/if}
     </div>
 
     {#if selected}
@@ -190,6 +212,7 @@
   .range { flex: 1; min-width: 80px; accent-color: var(--color-accent); }
   .value { font-size: 12px; width: 58px; text-align: right; color: var(--color-neutral-300); }
   .hint { margin: 0; font-size: 12px; line-height: 1.45; color: var(--color-neutral-400); }
+  .hint.warn { color: var(--color-neutral-200); }
   .seg-opt { flex: 1; justify-content: center; background: transparent; border: 0; color: var(--color-neutral-400); min-height: 36px; }
   .seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
   .seg-opt.on { background: var(--color-accent-900); color: var(--color-accent-200); box-shadow: inset 0 0 0 1px var(--color-accent); }

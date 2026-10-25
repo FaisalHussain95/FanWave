@@ -343,6 +343,7 @@ static cJSON *receiver_json(void)
     cJSON_AddNumberToObject(o, "frequencyMHz", r.frequency_hz / 1e6);
     cJSON_AddNumberToObject(o, "minRssiDbm", hub_min_rssi());
     cJSON_AddBoolToObject(o, "scanning", hub_scanning());
+    cJSON_AddNumberToObject(o, "edgesPerSecond", radio_edge_rate());
     return o;
 }
 

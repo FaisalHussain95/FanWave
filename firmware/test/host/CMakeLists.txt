@@ -24,3 +24,12 @@ add_test(NAME status_pattern COMMAND test_status_pattern)
 add_executable(test_scan_math test_scan_math.c ${COMPONENTS}/rf_scan/scan_math.c)
 target_include_directories(test_scan_math PRIVATE ${COMPONENTS}/rf_scan/include)
 add_test(NAME scan_math COMMAND test_scan_math)
+
+add_executable(test_rf_segment test_rf_segment.c ${COMPONENTS}/rf/rf_segment.c)
+target_include_directories(test_rf_segment PRIVATE ${COMPONENTS}/rf/include)
+add_test(NAME rf_segment COMMAND test_rf_segment)
+
+add_executable(test_rx_pipeline test_rx_pipeline.c ${COMPONENTS}/rf/rf_segment.c ${COMPONENTS}/protocol/fw_protocol.c)
+target_include_directories(test_rx_pipeline PRIVATE ${COMPONENTS}/rf/include ${COMPONENTS}/protocol/include)
+target_link_libraries(test_rx_pipeline m)
+add_test(NAME rx_pipeline COMMAND test_rx_pipeline)
