@@ -7,18 +7,25 @@ import type {
   Capture,
   Fan,
   FanState,
+  FilteredReport,
   HubInfo,
   LearnSlot,
   LedSettings,
   ProtocolMatch,
   ReceiverState,
   Room,
+  ScanOptions,
+  ScanStatus,
   WifiNetwork,
 } from './types';
 
 type CaptureEvent = { type: 'capture'; now: number; capture: Capture; matches: ProtocolMatch[] };
 type FanEvent = { type: 'fan'; fan: Fan };
-type HubEvent = CaptureEvent | FanEvent;
+type ScanEvent = { type: 'scan'; scan: ScanStatus };
+type FilteredEvent = { type: 'filtered' } & FilteredReport;
+type HubEvent = CaptureEvent | FanEvent | ScanEvent | FilteredEvent;
+
+const scanEnded = (s: ScanStatus) => s.state === 'done' || s.state === 'failed' || s.state === 'cancelled';
 
 export class HttpHub implements HubApi {
   /** Date.now() minus the hub's uptime clock, from the latest response. */
@@ -175,6 +182,47 @@ export class HttpHub implements HubApi {
 
   analyze(captureId: number) {
     return this.request<ProtocolMatch[]>(`/api/captures/${captureId}/analysis`);
+  }
+
+  onFiltered(cb: (report: FilteredReport) => void) {
+    return this.subscribe((e) => {
+      if (e.type === 'filtered') cb(e);
+    });
+  }
+
+  scanFrequency(opts: ScanOptions, onProgress: (status: ScanStatus) => void, signal: AbortSignal) {
+    return new Promise<ScanStatus>((resolve, reject) => {
+      let ended = false;
+      let poll: ReturnType<typeof setInterval> | undefined;
+      const end = (fn: () => void) => {
+        if (ended) return;
+        ended = true;
+        stop();
+        clearInterval(poll);
+        fn();
+      };
+      const update = (s: ScanStatus) => {
+        if (ended) return;
+        onProgress(s);
+        if (scanEnded(s)) end(() => resolve(s));
+      };
+      // Progress arrives on the event socket; a slow poll covers a dropped socket.
+      const stop = this.subscribe((e) => {
+        if (e.type === 'scan') update(e.scan);
+      });
+      signal.addEventListener('abort', () => {
+        this.post<void>('/api/receiver/scan/cancel').catch(() => {});
+      });
+      this.post<ScanStatus>('/api/receiver/scan', opts).then(
+        (s) => {
+          update(s);
+          poll = setInterval(() => {
+            this.request<ScanStatus>('/api/receiver/scan').then(update, () => {});
+          }, 3000);
+        },
+        (err) => end(() => reject(err)),
+      );
+    });
   }
 
   listenForRemote(cb: (signal: PairSignal) => void) {

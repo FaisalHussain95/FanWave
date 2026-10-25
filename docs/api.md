@@ -81,12 +81,48 @@ fan's learned codes, it updates `confirmed` and pushes a `fan` event.
 |---|---|
 | `GET /api/captures` | `{now, captures: Capture[]}`, newest first, up to 20 |
 | `GET /api/captures/{id}/analysis` | `ProtocolMatch[]`, best first; empty when nothing decodes |
-| `GET /api/receiver` | `{listening, modulation, frequencyMHz}` |
-| `POST /api/receiver` | Any of `{listening, modulation, frequencyMHz}`. Returns the new state |
+| `GET /api/receiver` | `{listening, modulation, frequencyMHz, minRssiDbm, scanning}` |
+| `POST /api/receiver` | Any of `{listening, modulation, frequencyMHz, minRssiDbm}`. Returns the new state. `409` if a scan is running and the radio settings would change |
+| `POST /api/receiver/scan` | Start a frequency scan: `{fromMHz?, toMHz?, quietSeconds?, holdSeconds?}` (defaults 300, 464, 3, 9). `202` with the scan's status; `409` if one is already running |
+| `GET /api/receiver/scan` | The current or last scan's status, with `spectrum` once done |
+| `POST /api/receiver/scan/cancel` | Stop a running scan. `204` |
 
-Bursts that no decoder recognises and that arrive weaker than
-`CONFIG_FANWAVE_RF_MIN_RSSI` (−80 dBm by default) are treated as noise and
-never become captures.
+### Noise threshold
+
+Bursts that no decoder recognises and that arrive weaker than `minRssiDbm`
+are treated as noise and never become captures. It starts at
+`CONFIG_FANWAVE_RF_MIN_RSSI` (−80 dBm) and can be set from −110 to −30; a value
+set through the API or the `threshold` console command is saved and kept
+across restarts and updates. Dropped bursts are logged on the console, up to
+five a second plus a count of the rest, and summarised in `filtered` events.
+
+### Frequency scan
+
+Finds what a remote transmits on. The hub steps the CC1101 across the range
+(250 kHz steps for wide ranges, down to 50 kHz for narrow ones, skipping the
+gaps between its bands) and keeps the loudest RSSI at each step, in two
+passes: `quiet` with nothing pressed, then `hold` while the user holds a
+button. The answer is the step that rose most over its own quiet reading, so
+the CC1101's spurious responses at multiples of its 26 MHz crystal (390, 416,
+442 MHz…) and the hub's own interference, which are loud in both passes, don't
+win. If something rose 10 dB or more, a `refine` pass in 25 kHz steps around it
+finds the centre. Captures, transmits and radio changes wait until the scan ends;
+the receiver then returns to its previous frequency.
+
+```jsonc
+{
+  "state": "done",            // idle | quiet | hold | refine | done | failed | cancelled
+  "progress": 1,
+  "fromMHz": 300, "toMHz": 464, "stepKHz": 250,
+  "candidateMHz": 434.0,      // refine only
+  "found": true,              // something rose 10 dB or more
+  "frequencyMHz": 433.915,    // refined centre
+  "peakDbm": -44, "riseDb": 55, "floorDbm": -99,
+  "candidates": [{ "frequencyMHz": 434.0, "peakDbm": -48, "riseDb": 51 }],
+  "spectrum": [[300.0, -100, -99], [300.5, -101, -100]],  // [MHz, quiet dBm, held dBm], up to 240 points
+  "error": "…"                // failed only
+}
+```
 
 ## Backup
 
@@ -102,4 +138,9 @@ Server to client only, one JSON object per text frame:
 ```jsonc
 { "type": "capture", "now": 123456, "capture": { /* Capture */ }, "matches": [ /* ProtocolMatch */ ] }
 { "type": "fan", "fan": { /* Fan */ } }
+{ "type": "scan", "scan": { /* scan status, as above; spectrum only in the final one */ } }
+{ "type": "filtered", "count": 12, "strongestDbm": -83, "thresholdDbm": -80, "periodMs": 2000 }
 ```
+
+`scan` arrives on every phase change and about every 400 ms in between.
+`filtered` summarises the bursts dropped as noise, every 2 s while there are any.

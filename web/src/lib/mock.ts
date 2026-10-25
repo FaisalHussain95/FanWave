@@ -8,6 +8,7 @@ import type {
   Capture,
   Fan,
   FanState,
+  FilteredReport,
   HubInfo,
   LearnSlot,
   LedSettings,
@@ -15,6 +16,8 @@ import type {
   ProtocolMatch,
   ReceiverState,
   Room,
+  ScanOptions,
+  ScanStatus,
   WifiNetwork,
 } from './types';
 import { bitsToHex, splitFrame } from './rf';
@@ -143,6 +146,31 @@ function matchesFor(c: Capture): ProtocolMatch[] {
   return [pt, ev, nexa].sort((a, b) => b.confidence - a.confidence);
 }
 
+const bands: [number, number][] = [[300, 348], [387, 464], [779, 928]];
+
+function mockScanResult(opts: ScanOptions, base: Partial<ScanStatus>): ScanStatus {
+  const remote = 433.92, spur = 390;
+  const steps: number[] = [];
+  for (let f = opts.fromMHz; f <= opts.toMHz + 1e-9; f = Math.round((f + 0.25) * 1000) / 1000) {
+    if (bands.some(([lo, hi]) => f >= lo && f <= hi)) steps.push(f);
+  }
+  const noise = () => -101 + Math.round(Math.random() * 5);
+  const spectrum = steps.map((f): [number, number, number] => {
+    const quiet = Math.abs(f - spur) < 0.13 ? -52 : noise();
+    const off = Math.abs(f - remote);
+    const held = off < 0.4 ? Math.max(quiet, Math.round(-44 - off * 60)) : Math.max(quiet, noise());
+    return [f, quiet, held];
+  });
+  const hasRemote = remote >= opts.fromMHz && remote <= opts.toMHz && bands.some(([lo, hi]) => remote >= lo && remote <= hi);
+  const floor = -99;
+  return {
+    ...base, state: 'done', progress: 1, found: hasRemote, floorDbm: floor,
+    ...(hasRemote ? { frequencyMHz: 433.915, peakDbm: -44, riseDb: 55 } : {}),
+    candidates: hasRemote ? [{ frequencyMHz: 434, peakDbm: -48, riseDb: 51 }] : [],
+    spectrum,
+  };
+}
+
 export class MockHub implements HubApi {
   private state = load();
   private captureList = structuredClone(seedCaptures);
@@ -150,6 +178,8 @@ export class MockHub implements HubApi {
   private listening = true;
   private modulation: Modulation = 'OOK';
   private frequencyMHz = 433.92;
+  private minRssiDbm = -80;
+  private scanning = false;
   private captureSubs = new Set<(c: Capture) => void>();
   private captureTimer: ReturnType<typeof setInterval> | null = null;
   private info: HubInfo = {
@@ -257,18 +287,71 @@ export class MockHub implements HubApi {
     return () => {};
   }
 
+  private receiverState(): ReceiverState {
+    return {
+      listening: this.listening, modulation: this.modulation, frequencyMHz: this.frequencyMHz,
+      minRssiDbm: this.minRssiDbm, scanning: this.scanning,
+    };
+  }
+
   async receiver(): Promise<ReceiverState> {
     await wait(40);
-    return { listening: this.listening, modulation: this.modulation, frequencyMHz: this.frequencyMHz };
+    return this.receiverState();
   }
 
   async setReceiver(opts: Partial<ReceiverState>) {
     await wait(60);
+    const radio = (opts.listening !== undefined && opts.listening !== this.listening) ||
+      (opts.modulation !== undefined && opts.modulation !== this.modulation) ||
+      (opts.frequencyMHz !== undefined && opts.frequencyMHz !== this.frequencyMHz);
+    if (this.scanning && radio) throw new Error('A frequency scan is running; try again when it finishes.');
+    if (opts.minRssiDbm !== undefined) {
+      if (opts.minRssiDbm < -110 || opts.minRssiDbm > -30) throw new Error('The noise threshold must be between -110 and -30 dBm.');
+      this.minRssiDbm = Math.round(opts.minRssiDbm);
+    }
     this.listening = opts.listening ?? this.listening;
     this.modulation = opts.modulation ?? this.modulation;
     this.frequencyMHz = opts.frequencyMHz ?? this.frequencyMHz;
     this.syncCaptureTimer();
-    return { listening: this.listening, modulation: this.modulation, frequencyMHz: this.frequencyMHz };
+    return this.receiverState();
+  }
+
+  onFiltered(cb: (r: FilteredReport) => void) {
+    // A little noise just under the threshold every few seconds, more when it's set low.
+    const timer = setInterval(() => {
+      if (!this.listening || this.scanning) return;
+      const count = Math.max(0, Math.round((this.minRssiDbm + 112) / 6 + Math.random() * 3 - 1));
+      if (count) cb({ count, strongestDbm: this.minRssiDbm - 1 - Math.round(Math.random() * 6), thresholdDbm: this.minRssiDbm, periodMs: 2000 });
+    }, 2000);
+    return () => clearInterval(timer);
+  }
+
+  scanFrequency(opts: ScanOptions, onProgress: (s: ScanStatus) => void, signal: AbortSignal) {
+    // A remote at 433.92 MHz that only shows while held, and a crystal spur at
+    // 390 MHz that's loud in both passes: what the real scan has to tell apart.
+    const quietMs = (opts.quietSeconds ?? 3) * 1000;
+    const holdMs = (opts.holdSeconds ?? 9) * 1000;
+    const base = { fromMHz: opts.fromMHz, toMHz: opts.toMHz, stepKHz: 250 };
+    if (this.scanning) return Promise.reject(new Error('A scan is already running.'));
+    this.scanning = true;
+    return new Promise<ScanStatus>((resolve) => {
+      const start = Date.now();
+      const finish = (s: ScanStatus) => {
+        clearInterval(timer);
+        this.scanning = false;
+        onProgress(s);
+        resolve(s);
+      };
+      signal.addEventListener('abort', () => finish({ ...base, state: 'cancelled' }));
+      const timer = setInterval(() => {
+        const t = Date.now() - start;
+        const progress = Math.min(t / (quietMs + holdMs), 0.99);
+        if (t < quietMs) onProgress({ ...base, state: 'quiet', progress });
+        else if (t < quietMs + holdMs * 0.75) onProgress({ ...base, state: 'hold', progress });
+        else if (t < quietMs + holdMs) onProgress({ ...base, state: 'refine', progress, candidateMHz: 434 });
+        else finish(mockScanResult(opts, base));
+      }, 400);
+    });
   }
 
   onCapture(cb: (c: Capture) => void) {

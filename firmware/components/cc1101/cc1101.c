@@ -36,6 +36,7 @@ enum { S_SRES = 0x30, S_SCAL = 0x33, S_SRX = 0x34, S_STX = 0x35, S_SIDLE = 0x36,
 #define BURST 0x40
 
 #define MARCSTATE_IDLE 0x01
+#define MARCSTATE_RX 0x0D
 
 static spi_device_handle_t s_dev;
 static cc1101_pins_t s_pins;
@@ -108,6 +109,23 @@ static esp_err_t wait_idle(uint32_t timeout_ms)
         esp_rom_delay_us(50);
     } while (esp_timer_get_time() < deadline);
     return ESP_ERR_TIMEOUT;
+}
+
+/** FREQ2..0: the carrier in units of XOSC / 2^16. */
+static uint32_t freq_word(uint32_t hz)
+{
+    return (uint32_t)(((uint64_t)hz << 16) / XOSC_HZ);
+}
+
+/**
+ * Below 430.6 MHz the VCO needs different calibration settings (FSCAL2,
+ * TEST0); with the 433 MHz values the synthesiser doesn't lock cleanly around
+ * 303–315 MHz. Values as reported by fan projects using 303 MHz remotes;
+ * confirm on hardware.
+ */
+static bool low_vco_band(uint32_t hz)
+{
+    return hz < 430600000;
 }
 
 cc1101_config_t cc1101_default_config(void)
@@ -223,11 +241,8 @@ esp_err_t cc1101_configure(const cc1101_config_t *c)
     ESP_RETURN_ON_FALSE(cc1101_frequency_supported(c->frequency_hz), ESP_ERR_INVALID_ARG, TAG,
                         "%lu Hz is outside the CC1101 bands", (unsigned long)c->frequency_hz);
     bool ook = c->modulation == CC1101_MOD_OOK;
-    uint32_t freq = (uint32_t)(((uint64_t)c->frequency_hz << 16) / XOSC_HZ);
-    // Below 430.6 MHz the VCO needs different calibration settings; with the
-    // 433 MHz values the synthesiser doesn't lock cleanly around 303–315 MHz.
-    // Values as reported by fan projects using 303 MHz remotes; confirm on hardware.
-    bool low_vco = c->frequency_hz < 430600000;
+    uint32_t freq = freq_word(c->frequency_hz);
+    bool low_vco = low_vco_band(c->frequency_hz);
 
     const uint8_t regs[][2] = {
         {REG_IOCFG2, 0x0D},   // GDO2: asynchronous serial data out (RX)
@@ -260,7 +275,7 @@ esp_err_t cc1101_configure(const cc1101_config_t *c)
         {REG_FREND1, 0x56},
         {REG_FREND0, ook ? 0x11 : 0x10}, // OOK: PATABLE[0] for 0, PATABLE[1] for 1
         {REG_FSCAL3, 0xE9},
-        {REG_FSCAL2, low_vco ? 0x0A : 0x2A},
+        {REG_FSCAL2, low_vco ? 0x0A : 0x2A}, // see low_vco_band()
         {REG_FSCAL1, 0x00},
         {REG_FSCAL0, 0x1F},
         {REG_TEST2, 0x81},
@@ -328,4 +343,33 @@ int cc1101_rssi_dbm(void)
     // Datasheet 17.3: two's complement in half-dB steps, offset 74 dB.
     int v = raw >= 128 ? (int)raw - 256 : raw;
     return v / 2 - 74;
+}
+
+esp_err_t cc1101_tune_rx(uint32_t hz)
+{
+    ESP_RETURN_ON_FALSE(cc1101_frequency_supported(hz), ESP_ERR_INVALID_ARG, TAG, "%lu Hz is outside the CC1101 bands",
+                        (unsigned long)hz);
+    uint32_t freq = freq_word(hz);
+    uint8_t words[3] = {(uint8_t)(freq >> 16), (uint8_t)(freq >> 8), (uint8_t)freq};
+    bool low_vco = low_vco_band(hz);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    esp_err_t err = strobe(S_SIDLE);
+    if (err == ESP_OK) err = wait_idle(2);
+    if (err == ESP_OK) err = write_burst(REG_FREQ2, words, sizeof(words));
+    if (err == ESP_OK) err = write_reg(REG_FSCAL2, low_vco ? 0x0A : 0x2A);
+    if (err == ESP_OK) err = write_reg(REG_TEST0, low_vco ? 0x0B : 0x09);
+    // MCSM0 calibrates on the way out of idle, so SRX recalibrates for the new frequency.
+    if (err == ESP_OK) err = strobe(S_SFRX);
+    if (err == ESP_OK) err = strobe(S_SRX);
+    xSemaphoreGive(s_lock);
+    return err;
+}
+
+bool cc1101_in_rx(void)
+{
+    uint8_t state = 0;
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    esp_err_t err = read_status(ST_MARCSTATE, &state);
+    xSemaphoreGive(s_lock);
+    return err == ESP_OK && (state & 0x1F) == MARCSTATE_RX;
 }

@@ -2,6 +2,7 @@
 
 #include "api.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +22,7 @@
 #include "freertos/task.h"
 #include "hub.h"
 #include "rf.h"
+#include "freq_scan.h"
 #include "settings.h"
 #include "status_led.h"
 #include "storage.h"
@@ -339,6 +341,8 @@ static cJSON *receiver_json(void)
     cJSON_AddBoolToObject(o, "listening", radio_listening());
     cJSON_AddStringToObject(o, "modulation", r.modulation == CC1101_MOD_OOK ? "OOK" : "FSK");
     cJSON_AddNumberToObject(o, "frequencyMHz", r.frequency_hz / 1e6);
+    cJSON_AddNumberToObject(o, "minRssiDbm", hub_min_rssi());
+    cJSON_AddBoolToObject(o, "scanning", hub_scanning());
     return o;
 }
 
@@ -368,12 +372,67 @@ static esp_err_t post_receiver(httpd_req_t *req)
         change |= hz != r.frequency_hz;
         r.frequency_hz = hz;
     }
+    if (cJSON_IsNumber(v = cJSON_GetObjectItemCaseSensitive(body, "minRssiDbm"))) {
+        if (hub_set_min_rssi((int)lround(v->valuedouble)) != ESP_OK) {
+            cJSON_Delete(body);
+            return send_error(req, "400 Bad Request", "The noise threshold must be between -110 and -30 dBm.");
+        }
+    }
     const cJSON *listening = cJSON_GetObjectItemCaseSensitive(body, "listening");
+    // Only touch the radio for real changes, so that a client re-sending the
+    // current state (or only the threshold) during a scan isn't refused.
+    bool listen_change = cJSON_IsBool(listening) && cJSON_IsTrue(listening) != radio_listening();
     esp_err_t err = change ? hub_set_radio(&r) : ESP_OK;
-    if (err == ESP_OK && cJSON_IsBool(listening)) err = radio_set_listening(cJSON_IsTrue(listening));
+    if (err == ESP_OK && listen_change) err = hub_set_listening(cJSON_IsTrue(listening));
     cJSON_Delete(body);
+    if (err == ESP_ERR_INVALID_STATE && hub_scanning()) {
+        return send_error(req, "409 Conflict", "A frequency scan is running; try again when it finishes.");
+    }
     if (err != ESP_OK) return send_error(req, "500 Internal Server Error", esp_err_to_name(err));
     return send_json(req, "200 OK", receiver_json());
+}
+
+static esp_err_t get_receiver_scan(httpd_req_t *req)
+{
+    return send_json(req, "200 OK", freq_scan_json(true));
+}
+
+static uint32_t mhz_field(const cJSON *body, const char *key, uint32_t fallback)
+{
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(body, key);
+    return cJSON_IsNumber(v) && v->valuedouble > 0 && v->valuedouble < 4000 ? (uint32_t)(v->valuedouble * 1e6 + 0.5)
+                                                                           : fallback;
+}
+
+static uint32_t seconds_field(const cJSON *body, const char *key, uint32_t fallback_ms)
+{
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(body, key);
+    return cJSON_IsNumber(v) && v->valuedouble > 0 && v->valuedouble < 3600 ? (uint32_t)(v->valuedouble * 1000)
+                                                                           : fallback_ms;
+}
+
+static esp_err_t post_receiver_scan(httpd_req_t *req)
+{
+    cJSON *body = read_json(req, 1024);
+    if (!body) return ESP_OK;
+    freq_scan_request_t r = freq_scan_default_request();
+    r.from_hz = mhz_field(body, "fromMHz", r.from_hz);
+    r.to_hz = mhz_field(body, "toMHz", r.to_hz);
+    r.quiet_ms = seconds_field(body, "quietSeconds", r.quiet_ms);
+    r.hold_ms = seconds_field(body, "holdSeconds", r.hold_ms);
+    cJSON_Delete(body);
+    char err[96] = "";
+    esp_err_t e = freq_scan_start(&r, err);
+    if (e == ESP_ERR_INVALID_STATE) return send_error(req, "409 Conflict", err);
+    if (e != ESP_OK) return send_error(req, e == ESP_ERR_INVALID_ARG ? "400 Bad Request" : "500 Internal Server Error", err);
+    return send_json(req, "202 Accepted", freq_scan_json(false));
+}
+
+static esp_err_t post_receiver_scan_cancel(httpd_req_t *req)
+{
+    if (!same_origin(req)) return send_error(req, "403 Forbidden", "Cross-origin requests are not allowed.");
+    freq_scan_cancel();
+    return send_no_content(req);
 }
 
 // --- backup ---------------------------------------------------------------
@@ -460,6 +519,17 @@ void api_broadcast_capture(const capture_t *c)
     api_broadcast(o);
 }
 
+void api_broadcast_filtered(unsigned count, int strongest_dbm, int threshold_dbm, uint32_t period_ms)
+{
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "type", "filtered");
+    cJSON_AddNumberToObject(o, "count", count);
+    cJSON_AddNumberToObject(o, "strongestDbm", strongest_dbm);
+    cJSON_AddNumberToObject(o, "thresholdDbm", threshold_dbm);
+    cJSON_AddNumberToObject(o, "periodMs", period_ms);
+    api_broadcast(o);
+}
+
 // --- web app files ----------------------------------------------------------
 
 static const char *content_type(const char *path)
@@ -542,6 +612,9 @@ esp_err_t api_start(void)
         {.uri = "/api/captures/*", .method = HTTP_GET, .handler = get_analysis},
         {.uri = "/api/receiver", .method = HTTP_GET, .handler = get_receiver},
         {.uri = "/api/receiver", .method = HTTP_POST, .handler = post_receiver},
+        {.uri = "/api/receiver/scan", .method = HTTP_GET, .handler = get_receiver_scan},
+        {.uri = "/api/receiver/scan", .method = HTTP_POST, .handler = post_receiver_scan},
+        {.uri = "/api/receiver/scan/cancel", .method = HTTP_POST, .handler = post_receiver_scan_cancel},
         {.uri = "/api/backup", .method = HTTP_GET, .handler = get_backup},
         {.uri = "/api/restore", .method = HTTP_POST, .handler = post_restore},
         {.uri = "/api/events", .method = HTTP_GET, .handler = ws_events, .is_websocket = true},

@@ -121,6 +121,55 @@ export interface ReceiverState {
   listening: boolean;
   modulation: Modulation;
   frequencyMHz: number;
+  /** Undecoded bursts weaker than this (dBm) are dropped as noise. Saved on the hub. */
+  minRssiDbm: number;
+  /** A frequency scan has the radio: frequency, modulation and listening can't change. */
+  scanning?: boolean;
+}
+
+/** Bursts the hub dropped as noise over the last periodMs. */
+export interface FilteredReport {
+  count: number;
+  strongestDbm: number;
+  thresholdDbm: number;
+  periodMs: number;
+}
+
+export type ScanState = 'idle' | 'quiet' | 'hold' | 'refine' | 'done' | 'failed' | 'cancelled';
+
+export interface ScanOptions {
+  fromMHz: number;
+  toMHz: number;
+  quietSeconds?: number;
+  holdSeconds?: number;
+}
+
+export interface ScanCandidate {
+  frequencyMHz: number;
+  peakDbm: number;
+  /** How far it rose over the same frequency's background. */
+  riseDb: number;
+}
+
+/** A frequency scan, as GET /api/receiver/scan and the "scan" event report it. See docs/api.md. */
+export interface ScanStatus {
+  state: ScanState;
+  progress?: number;
+  fromMHz?: number;
+  toMHz?: number;
+  stepKHz?: number;
+  /** While refining: where it's narrowing down. */
+  candidateMHz?: number;
+  // Once done:
+  found?: boolean;
+  frequencyMHz?: number;
+  peakDbm?: number;
+  floorDbm?: number;
+  riseDb?: number;
+  candidates?: ScanCandidate[];
+  /** [MHz, background dBm, while-holding dBm], at most 240 points. */
+  spectrum?: [number, number, number][];
+  error?: string;
 }
 
 export interface LearnSlot {

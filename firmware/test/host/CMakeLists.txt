@@ -20,3 +20,7 @@ add_executable(test_status_pattern test_status_pattern.c ${COMPONENTS}/status_le
 target_include_directories(test_status_pattern PRIVATE ${COMPONENTS}/status_led/include)
 target_link_libraries(test_status_pattern m)
 add_test(NAME status_pattern COMMAND test_status_pattern)
+
+add_executable(test_scan_math test_scan_math.c ${COMPONENTS}/rf_scan/scan_math.c)
+target_include_directories(test_scan_math PRIVATE ${COMPONENTS}/rf_scan/include)
+add_test(NAME scan_math COMMAND test_scan_math)

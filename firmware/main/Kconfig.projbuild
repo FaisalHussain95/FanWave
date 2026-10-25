@@ -52,7 +52,9 @@ menu "FanWave"
             stream of short bursts. Bursts that no decoder recognises are
             dropped unless they arrived at least this strong. Raise it if
             noise still shows up in the RF Lab; lower it if a weak remote is
-            missed.
+            missed. This is only the starting value: the RF Lab and the
+            "threshold" console command change it at run time, and the value
+            they set is saved and takes precedence.
 
     config FANWAVE_RF_IDLE_US
         int "Silence that ends a capture (µs)"

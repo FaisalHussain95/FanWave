@@ -1,16 +1,19 @@
 <script lang="ts">
+  import FrequencyFinder from '../components/FrequencyFinder.svelte';
   import TabBar from '../components/TabBar.svelte';
   import { api, app } from '../lib/app.svelte';
   import Icon from '../lib/Icon.svelte';
   import { bitsToHex, nibbles, wavePath } from '../lib/rf';
   import { href } from '../lib/router.svelte';
-  import type { Capture, Modulation } from '../lib/types';
+  import type { Capture, FilteredReport, Modulation } from '../lib/types';
 
   let captures = $state<Capture[]>([]);
   let selectedId = $state<number | null>(null);
   let listening = $state(true);
   let modulation = $state<Modulation>('OOK');
   let frequency = $state(433.92);
+  let minRssi = $state(-80);
+  let scanning = $state(false);
   let ready = $state(false);
 
   // Common remote frequencies: US ceiling fans sit around 303–305 MHz.
@@ -23,6 +26,8 @@
     listening = r.listening;
     modulation = r.modulation;
     frequency = r.frequencyMHz;
+    minRssi = r.minRssiDbm;
+    scanning = !!r.scanning;
     ready = true;
   });
 
@@ -38,6 +43,23 @@
     if (ready) api.setReceiver(opts).catch((e) => app.notify(e instanceof Error ? e.message : String(e)));
   });
 
+  function saveThreshold() {
+    api.setReceiver({ minRssiDbm: minRssi }).catch((e) => app.notify(e instanceof Error ? e.message : String(e)));
+  }
+
+  // What the noise filter dropped over the last FILTER_WINDOW_MS, from the hub's periodic summaries.
+  const FILTER_WINDOW_MS = 10_000;
+  let filtered = $state<(FilteredReport & { at: number })[]>([]);
+  let clock = $state(Date.now());
+  $effect(() => api.onFiltered((r) => (filtered = [...filtered, { ...r, at: Date.now() }].slice(-20))));
+  $effect(() => {
+    const t = setInterval(() => (clock = Date.now()), 1000);
+    return () => clearInterval(t);
+  });
+  const recent = $derived(filtered.filter((r) => clock - r.at < FILTER_WINDOW_MS));
+  const dropped = $derived(recent.reduce((n, r) => n + r.count, 0));
+  const loudestDropped = $derived(recent.length ? Math.max(...recent.map((r) => r.strongestDbm)) : null);
+
   const frequencyOptions = $derived(presets.includes(frequency) ? presets : [...presets, frequency].sort((a, b) => a - b));
 
   function captureText(c: Capture) {
@@ -49,7 +71,7 @@
   <div class="screen-body lab">
     <div class="head">
       <h1 class="screen-title">RF Explorer</h1>
-      <button class="btn btn-secondary" style="height:34px" aria-pressed={listening} onclick={() => (listening = !listening)}>
+      <button class="btn btn-secondary" style="height:34px" aria-pressed={listening} disabled={scanning} onclick={() => (listening = !listening)}>
         <span class="accent"><Icon name={listening ? 'record-fill' : 'play'} /></span>{listening ? 'Listening' : 'Paused'}
       </button>
     </div>
@@ -57,13 +79,42 @@
     <div class="tune">
       <div class="seg" role="group" aria-label="Modulation">
         {#each ['OOK', 'FSK'] as const as m (m)}
-          <button class="seg-opt" class:on={modulation === m} aria-pressed={modulation === m} onclick={() => (modulation = m)}>{m}</button>
+          <button class="seg-opt" class:on={modulation === m} aria-pressed={modulation === m} disabled={scanning} onclick={() => (modulation = m)}>{m}</button>
         {/each}
       </div>
       <label class="visually-hidden" for="rx-freq">Frequency</label>
-      <select id="rx-freq" class="freq mono" bind:value={frequency}>
+      <select id="rx-freq" class="freq mono" bind:value={frequency} disabled={scanning}>
         {#each frequencyOptions as f (f)}<option value={f}>{f} MHz</option>{/each}
       </select>
+    </div>
+
+    <FrequencyFinder onuse={(f) => (frequency = f)} onbusy={(b) => (scanning = b)} />
+
+    <div class="panel noise">
+      <div class="noise-row">
+        <label for="noise-threshold">Noise threshold</label>
+        <input
+          id="noise-threshold"
+          class="range"
+          type="range"
+          min="-110"
+          max="-30"
+          step="1"
+          bind:value={minRssi}
+          onchange={saveThreshold}
+        />
+        <span class="mono value">{minRssi} dBm</span>
+      </div>
+      <p class="hint">
+        {#if dropped}
+          Dropped as noise in the last 10 s: {dropped} burst{dropped === 1 ? '' : 's'}, loudest {loudestDropped} dBm.
+          {#if loudestDropped !== null && loudestDropped >= minRssi - 6}
+            Some are close to the threshold; lower it if a weak remote isn't showing up.
+          {/if}
+        {:else}
+          Undecoded bursts weaker than this are dropped as noise. Nothing dropped in the last 10 s.
+        {/if}
+      </p>
     </div>
 
     {#if selected}
@@ -133,6 +184,12 @@
     border: 1px solid var(--color-accent); border-radius: calc(var(--radius-md) * 0.75);
   }
   .seg { flex: 1; }
+  .noise { gap: 6px; padding: 12px; }
+  .noise-row { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+  .noise-row label { white-space: nowrap; }
+  .range { flex: 1; min-width: 80px; accent-color: var(--color-accent); }
+  .value { font-size: 12px; width: 58px; text-align: right; color: var(--color-neutral-300); }
+  .hint { margin: 0; font-size: 12px; line-height: 1.45; color: var(--color-neutral-400); }
   .seg-opt { flex: 1; justify-content: center; background: transparent; border: 0; color: var(--color-neutral-400); min-height: 36px; }
   .seg-opt + .seg-opt { border-left: 1px solid var(--color-divider); }
   .seg-opt.on { background: var(--color-accent-900); color: var(--color-accent-200); box-shadow: inset 0 0 0 1px var(--color-accent); }

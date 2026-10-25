@@ -332,7 +332,8 @@ static esp_err_t send_button(const cJSON *fan, const char *key, char *err)
     cc1101_config_t radio = fan_radio(fan);
     esp_err_t e = hub_transmit_on(&radio, d, n);
     free(d);
-    if (e != ESP_OK) snprintf(err, 96, "Transmit failed: %s", esp_err_to_name(e));
+    if (e != ESP_OK && hub_scanning()) snprintf(err, 96, "A frequency scan is running; try again when it finishes.");
+    else if (e != ESP_OK) snprintf(err, 96, "Transmit failed: %s", esp_err_to_name(e));
     return e;
 }
 
