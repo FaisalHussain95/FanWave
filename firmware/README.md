@@ -87,6 +87,11 @@ web app's partition still needs `idf.py flash`.)
    back to your Wi‑Fi and open that address. The setup network closes two
    minutes later.
 
+The hub also answers at http://fanwave.local (mDNS) and advertises itself
+as an `_http._tcp` service with its `FanWave-XXXX` name in the `id` TXT
+record. A second hub on the same network becomes `fanwave-2.local`. Some
+Android browsers don't resolve `.local` names; use the address there.
+
 If the saved network can't be reached for 20 seconds after boot, the
 access point opens again so you can fix it, while the hub keeps retrying.
 
